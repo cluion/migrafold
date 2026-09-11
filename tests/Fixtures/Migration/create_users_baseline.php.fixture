@@ -1,0 +1,38 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        if (Schema::hasTable('users')) {
+            return;
+        }
+
+        Schema::create('users', function (Blueprint $table): void {
+            $table->increments('id');
+            $table->integer('role_id');
+            $table->string('email')->collation('nocase');
+            $table->string('nickname')->nullable()->default('guest');
+            $table->string('normalized_email')->nullable()->virtualAs('lower(email)');
+            $table->index(['nickname', 'email'], 'users_lookup_index');
+            $table->foreign(['role_id'])
+                ->references(['id'])
+                ->on('roles')
+                ->onUpdate('cascade')
+                ->onDelete('restrict');
+        });
+    }
+
+    public function down(): void
+    {
+        throw new \RuntimeException(
+            'MGF-ROLLBACK-001: Migrafold baselines are irreversible; restore archived history or rebuild explicitly.'
+        );
+    }
+};

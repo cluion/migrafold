@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Schema;
 
+use Cluion\Migrafold\Migration\BaselineMigrationGenerator;
+use Cluion\Migrafold\Migration\GeneratedMigration;
 use Cluion\Migrafold\Schema\Exception\UnsupportedSchemaFeature;
 use Cluion\Migrafold\Schema\MySqlSchemaInspector;
 use Illuminate\Database\MariaDbConnection;
+use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\MySqlConnection;
+use Illuminate\Foundation\Application;
+use Illuminate\Support\Facades\Facade;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -57,6 +62,11 @@ final class MySqlSchemaInspectorTest extends TestCase
             ? new MariaDbConnection($pdo, $database, '', $config)
             : new MySqlConnection($pdo, $database, '', $config);
 
+        $container = new Application();
+        $container->instance('db', $this->connection);
+        $container->instance('db.schema', $this->connection->getSchemaBuilder());
+        Facade::setFacadeApplication($container);
+
         $this->resetDatabase();
     }
 
@@ -67,36 +77,15 @@ final class MySqlSchemaInspectorTest extends TestCase
             $this->connection->disconnect();
         }
 
+        Facade::clearResolvedInstances();
+        Facade::setFacadeApplication(null);
+
         parent::tearDown();
     }
 
     public function test_it_builds_a_canonical_snapshot_on_a_real_server(): void
     {
-        $this->connection->unprepared(<<<'SQL'
-create table roles (
-    id bigint unsigned not null auto_increment,
-    code varchar(32) collate utf8mb4_bin not null,
-    primary key (id),
-    unique key roles_code_unique (code)
-) engine = InnoDB default character set utf8mb4 collate utf8mb4_unicode_ci comment = 'Role catalog'
-SQL);
-        $this->connection->unprepared(<<<'SQL'
-create table users (
-    id bigint unsigned not null auto_increment,
-    role_id bigint unsigned not null,
-    email varchar(255) collate utf8mb4_bin not null comment 'Login address',
-    nickname varchar(80) null default 'guest',
-    status enum('active', 'disabled') not null default 'active',
-    normalized_email varchar(255) generated always as (lower(`email`)) virtual,
-    created_at timestamp null default current_timestamp,
-    primary key (id),
-    unique key users_email_unique (email),
-    key users_lookup_index (nickname, email),
-    fulltext key users_search_fulltext (email),
-    constraint users_role_id_foreign foreign key (role_id) references roles (id)
-        on update cascade on delete restrict
-) engine = InnoDB default character set utf8mb4 collate utf8mb4_unicode_ci comment = 'Application users'
-SQL);
+        $this->createSupportedSchema();
 
         $inspector = new MySqlSchemaInspector();
         $snapshot = $inspector->inspect($this->connection);
@@ -134,6 +123,70 @@ SQL);
         self::assertSame('users_role_id_foreign', $users->foreignKeys[0]->name);
         self::assertSame('cascade', $users->foreignKeys[0]->onUpdate);
         self::assertSame('restrict', $users->foreignKeys[0]->onDelete);
+    }
+
+    public function test_generated_baselines_replay_the_same_schema_on_a_real_server(): void
+    {
+        $this->createSupportedSchema();
+
+        $inspector = new MySqlSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_11');
+
+        $this->resetDatabase();
+
+        foreach ($generated as $migration) {
+            $this->runMigration($migration);
+        }
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_boolean_columns_round_trip_without_losing_mariadb_display_width(): void
+    {
+        $this->connection->statement(
+            'create table feature_flags (id bigint unsigned not null auto_increment primary key, enabled boolean not null default true)',
+        );
+
+        $inspector = new MySqlSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_11');
+
+        self::assertStringContainsString("\$table->boolean('enabled')->default(1);", $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    private function createSupportedSchema(): void
+    {
+        $this->connection->unprepared(<<<'SQL'
+create table roles (
+    id bigint unsigned not null auto_increment,
+    code varchar(32) collate utf8mb4_bin not null,
+    primary key (id),
+    unique key roles_code_unique (code)
+) engine = InnoDB default character set utf8mb4 collate utf8mb4_unicode_ci comment = 'Role catalog'
+SQL);
+        $this->connection->unprepared(<<<'SQL'
+create table users (
+    id bigint unsigned not null auto_increment,
+    role_id bigint unsigned not null,
+    email varchar(255) collate utf8mb4_bin not null comment 'Login address',
+    nickname varchar(80) null default 'guest',
+    status enum('active', 'disabled') not null default 'active',
+    normalized_email varchar(255) generated always as (lower(`email`)) virtual,
+    created_at timestamp null default current_timestamp,
+    primary key (id),
+    unique key users_email_unique (email),
+    key users_lookup_index (nickname, email),
+    fulltext key users_search_fulltext (email),
+    constraint users_role_id_foreign foreign key (role_id) references roles (id)
+        on update cascade on delete restrict
+) engine = InnoDB default character set utf8mb4 collate utf8mb4_unicode_ci comment = 'Application users'
+SQL);
     }
 
     public function test_exclusions_are_case_insensitive(): void
@@ -217,6 +270,27 @@ SQL);
 
         $schema->dropAllViews();
         $schema->dropAllTables();
+    }
+
+    private function runMigration(GeneratedMigration $generated): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'migrafold-generated-');
+
+        if ($path === false || file_put_contents($path, $generated->contents) === false) {
+            throw new RuntimeException('Unable to create a generated migration fixture.');
+        }
+
+        try {
+            $migration = require $path;
+        } finally {
+            unlink($path);
+        }
+
+        if (! $migration instanceof Migration || ! is_callable([$migration, 'up'])) {
+            throw new RuntimeException('Generated migration fixture did not return a migration.');
+        }
+
+        $migration->up();
     }
 
     private function environment(string $name): string

@@ -25,6 +25,7 @@ The current implementation includes:
 - A read-only SQLite schema inspector for columns, defaults, collations, generated columns, indexes, and foreign keys.
 - A read-only MySQL/MariaDB inspector with real-server coverage and fail-closed detection for schema details that are not yet representable.
 - Canonical, deterministic JSON snapshots with SHA-256 fingerprints and an explicit capability report.
+- A deterministic per-table PHP migration generator with dependency ordering, existing-table guards, and irreversible rollback protection.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
 ## Development
