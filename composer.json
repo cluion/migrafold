@@ -29,6 +29,9 @@
         "phpstan/phpstan": "^2.2",
         "phpunit/phpunit": "^11.5 || ^12.5 || ^13.0"
     },
+    "suggest": {
+        "cluion/moduark": "Enables runtime-backed discovery and table ownership for Moduark Modules."
+    },
     "autoload": {
         "psr-4": {
             "Cluion\\Migrafold\\": "src/"
