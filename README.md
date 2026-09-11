@@ -23,6 +23,7 @@ The current implementation includes:
 
 - Framework-lifecycle fixtures for Laravel's pending-list, migration-log, existing-table guard, and fail-closed rollback behavior.
 - A read-only SQLite schema inspector for columns, defaults, collations, generated columns, indexes, and foreign keys.
+- A read-only MySQL/MariaDB inspector with real-server coverage and fail-closed detection for schema details that are not yet representable.
 - Canonical, deterministic JSON snapshots with SHA-256 fingerprints and an explicit capability report.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
@@ -32,6 +33,7 @@ The current implementation includes:
 composer install
 composer test
 composer analyse
+composer test:databases
 ```
 
-The tests use an in-memory SQLite database and never connect to an application database.
+The default tests use an in-memory SQLite database. Database integration tests start isolated MySQL 8.0 and MariaDB 11.8 containers, accept only dedicated `*_testing` databases, and remove their containers and storage after the run.

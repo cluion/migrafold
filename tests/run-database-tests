@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+compose_file="$project_root/tests/docker-compose.yml"
+
+cleanup() {
+    docker compose -f "$compose_file" down --volumes
+}
+
+trap cleanup EXIT INT TERM
+
+docker compose -f "$compose_file" up -d --wait
+
+MIGRAFOLD_DATABASE_TESTS=1 \
+MIGRAFOLD_DB_DRIVER=mysql \
+MIGRAFOLD_DB_HOST=127.0.0.1 \
+MIGRAFOLD_DB_PORT=13306 \
+MIGRAFOLD_DB_DATABASE=migrafold_mysql_testing \
+MIGRAFOLD_DB_USERNAME=root \
+MIGRAFOLD_DB_PASSWORD=migrafold \
+"$project_root/vendor/bin/phpunit" --configuration "$project_root/phpunit.database.xml.dist"
+
+MIGRAFOLD_DATABASE_TESTS=1 \
+MIGRAFOLD_DB_DRIVER=mariadb \
+MIGRAFOLD_DB_HOST=127.0.0.1 \
+MIGRAFOLD_DB_PORT=13307 \
+MIGRAFOLD_DB_DATABASE=migrafold_mariadb_testing \
+MIGRAFOLD_DB_USERNAME=root \
+MIGRAFOLD_DB_PASSWORD=migrafold \
+"$project_root/vendor/bin/phpunit" --configuration "$project_root/phpunit.database.xml.dist"

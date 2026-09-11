@@ -48,6 +48,7 @@
             "@prepare",
             "@php vendor/bin/phpunit"
         ],
+        "test:databases": "tests/run-database-tests",
         "analyse": "@php vendor/bin/phpstan analyse --ansi --memory-limit=1G",
         "verify": [
             "@test",

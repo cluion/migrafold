@@ -1,0 +1,28 @@
+name: migrafold-schema-tests
+
+services:
+  mysql:
+    image: mysql:8.0.46
+    environment:
+      MYSQL_DATABASE: migrafold_mysql_testing
+      MYSQL_ROOT_PASSWORD: migrafold
+    ports:
+      - "127.0.0.1:13306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pmigrafold"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mariadb:
+    image: mariadb:11.8.9
+    environment:
+      MARIADB_DATABASE: migrafold_mariadb_testing
+      MARIADB_ROOT_PASSWORD: migrafold
+    ports:
+      - "127.0.0.1:13307:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
