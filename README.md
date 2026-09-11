@@ -26,6 +26,7 @@ The current implementation includes:
 - A read-only MySQL/MariaDB inspector with real-server coverage and fail-closed detection for schema details that are not yet representable.
 - Canonical, deterministic JSON snapshots with SHA-256 fingerprints and an explicit capability report.
 - A deterministic per-table PHP migration generator with dependency ordering, existing-table guards, and irreversible rollback protection.
+- A dry-run-first output writer with collision refusal, verified file publication, and a deterministic source/output manifest.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
 ## Development
