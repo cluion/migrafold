@@ -19,7 +19,12 @@ The planned first release targets:
 
 ## Current development
 
-The initial framework-lifecycle fixtures verify Laravel's pending-list, migration-log, existing-table guard, and fail-closed rollback behavior before public compaction APIs are introduced.
+The current implementation includes:
+
+- Framework-lifecycle fixtures for Laravel's pending-list, migration-log, existing-table guard, and fail-closed rollback behavior.
+- A read-only SQLite schema inspector for columns, defaults, collations, generated columns, indexes, and foreign keys.
+- Canonical, deterministic JSON snapshots with SHA-256 fingerprints and an explicit capability report.
+- Fail-closed detection for schema features that cannot yet be represented safely.
 
 ## Development
 

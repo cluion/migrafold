@@ -7,6 +7,7 @@ namespace Tests;
 use Cluion\Migrafold\MigrafoldServiceProvider;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Foundation\Application;
 use LogicException;
@@ -103,6 +104,17 @@ abstract class TestCase extends OrchestraTestCase
         }
 
         return $migrator;
+    }
+
+    protected function connection(): Connection
+    {
+        $manager = $this->application()->make('db');
+
+        if (! $manager instanceof DatabaseManager) {
+            throw new RuntimeException('Laravel database manager is unavailable.');
+        }
+
+        return $manager->connection('testing');
     }
 
     private function application(): Application

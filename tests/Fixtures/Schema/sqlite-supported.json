@@ -1,0 +1,190 @@
+{
+    "format_version": "1",
+    "driver": "sqlite",
+    "capabilities": {
+        "supported": [
+            "column_collation",
+            "column_defaults",
+            "columns",
+            "foreign_key_actions",
+            "foreign_keys",
+            "generated_columns",
+            "indexes",
+            "primary_keys",
+            "unique_indexes"
+        ],
+        "unsupported": [
+            "check_constraints",
+            "column_comments",
+            "expression_indexes",
+            "index_types",
+            "named_foreign_keys",
+            "partial_indexes",
+            "strict_tables",
+            "table_collation",
+            "table_comments",
+            "table_engine",
+            "triggers",
+            "views",
+            "virtual_tables",
+            "without_rowid"
+        ]
+    },
+    "tables": [
+        {
+            "name": "roles",
+            "schema": "main",
+            "collation": null,
+            "engine": null,
+            "comment": null,
+            "columns": [
+                {
+                    "name": "id",
+                    "type": "integer",
+                    "type_name": "integer",
+                    "nullable": false,
+                    "default": null,
+                    "auto_increment": true,
+                    "collation": null,
+                    "comment": null,
+                    "generation": null
+                },
+                {
+                    "name": "code",
+                    "type": "varchar",
+                    "type_name": "varchar",
+                    "nullable": false,
+                    "default": null,
+                    "auto_increment": false,
+                    "collation": null,
+                    "comment": null,
+                    "generation": null
+                }
+            ],
+            "indexes": [
+                {
+                    "name": "primary",
+                    "columns": [
+                        "id"
+                    ],
+                    "type": null,
+                    "unique": true,
+                    "primary": true
+                },
+                {
+                    "name": "roles_code_unique",
+                    "columns": [
+                        "code"
+                    ],
+                    "type": null,
+                    "unique": true,
+                    "primary": false
+                }
+            ],
+            "foreign_keys": []
+        },
+        {
+            "name": "users",
+            "schema": "main",
+            "collation": null,
+            "engine": null,
+            "comment": null,
+            "columns": [
+                {
+                    "name": "id",
+                    "type": "integer",
+                    "type_name": "integer",
+                    "nullable": false,
+                    "default": null,
+                    "auto_increment": true,
+                    "collation": null,
+                    "comment": null,
+                    "generation": null
+                },
+                {
+                    "name": "role_id",
+                    "type": "integer",
+                    "type_name": "integer",
+                    "nullable": false,
+                    "default": null,
+                    "auto_increment": false,
+                    "collation": null,
+                    "comment": null,
+                    "generation": null
+                },
+                {
+                    "name": "email",
+                    "type": "varchar",
+                    "type_name": "varchar",
+                    "nullable": false,
+                    "default": null,
+                    "auto_increment": false,
+                    "collation": "nocase",
+                    "comment": null,
+                    "generation": null
+                },
+                {
+                    "name": "nickname",
+                    "type": "varchar",
+                    "type_name": "varchar",
+                    "nullable": true,
+                    "default": "'guest'",
+                    "auto_increment": false,
+                    "collation": null,
+                    "comment": null,
+                    "generation": null
+                },
+                {
+                    "name": "normalized_email",
+                    "type": "varchar",
+                    "type_name": "varchar",
+                    "nullable": true,
+                    "default": null,
+                    "auto_increment": false,
+                    "collation": null,
+                    "comment": null,
+                    "generation": {
+                        "type": "virtual",
+                        "expression": "lower(email)"
+                    }
+                }
+            ],
+            "indexes": [
+                {
+                    "name": "primary",
+                    "columns": [
+                        "id"
+                    ],
+                    "type": null,
+                    "unique": true,
+                    "primary": true
+                },
+                {
+                    "name": "users_lookup_index",
+                    "columns": [
+                        "nickname",
+                        "email"
+                    ],
+                    "type": null,
+                    "unique": false,
+                    "primary": false
+                }
+            ],
+            "foreign_keys": [
+                {
+                    "name": null,
+                    "columns": [
+                        "role_id"
+                    ],
+                    "foreign_schema": "main",
+                    "foreign_table": "roles",
+                    "foreign_columns": [
+                        "id"
+                    ],
+                    "on_update": "cascade",
+                    "on_delete": "restrict"
+                }
+            ]
+        }
+    ]
+}
