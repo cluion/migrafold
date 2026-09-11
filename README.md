@@ -28,6 +28,7 @@ The current implementation includes:
 - A deterministic per-table PHP migration generator with dependency ordering, existing-table guards, and irreversible rollback protection.
 - A dry-run-first output writer with collision refusal, verified file publication, and a deterministic source/output manifest.
 - Deterministic migration discovery for Laravel applications and active Moduark Modules, including explicit table ownership and source fingerprints.
+- Owner-aware output planning with per-owner manifests, global dry-run preflight, and rollback across application and Module directories.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
 ## Development

@@ -21,6 +21,7 @@ final class BaselineOutputPlanner
         SchemaSnapshot $snapshot,
         array $migrations,
         array $sources,
+        ?BaselineManifestOwner $owner = null,
     ): BaselineOutputPlan {
         $directory = $this->normalizeDirectory($directory);
         $files = $this->migrationFiles($migrations);
@@ -42,6 +43,11 @@ final class BaselineOutputPlanner
                 $files,
             ),
         ];
+
+        if ($owner !== null) {
+            $manifest['owner'] = $owner->toArray();
+        }
+
         $contents = json_encode(
             $manifest,
             JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
