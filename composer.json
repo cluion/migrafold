@@ -54,6 +54,7 @@
             "@php vendor/bin/phpunit"
         ],
         "test:consumer": "tests/Consumer/run",
+        "test:database-consumer": "tests/DatabaseConsumer/run",
         "test:databases": "tests/run-database-tests",
         "test:moduark": "tests/Interop/Moduark/run",
         "test:nwidart": "tests/Interop/Nwidart/run",

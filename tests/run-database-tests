@@ -30,3 +30,5 @@ MIGRAFOLD_DB_DATABASE=migrafold_mariadb_testing \
 MIGRAFOLD_DB_USERNAME=root \
 MIGRAFOLD_DB_PASSWORD=migrafold \
 "$project_root/vendor/bin/phpunit" --configuration "$project_root/phpunit.database.xml.dist"
+
+"$project_root/tests/DatabaseConsumer/run"

@@ -11,6 +11,7 @@ on:
       - 'phpunit.database.xml.dist'
       - 'src/**'
       - 'tests/Fixtures/Schema/**'
+      - 'tests/DatabaseConsumer/**'
       - 'tests/Integration/**'
       - 'tests/docker-compose.yml'
       - 'tests/run-database-tests'
@@ -22,6 +23,7 @@ on:
       - 'phpunit.database.xml.dist'
       - 'src/**'
       - 'tests/Fixtures/Schema/**'
+      - 'tests/DatabaseConsumer/**'
       - 'tests/Integration/**'
       - 'tests/docker-compose.yml'
       - 'tests/run-database-tests'
@@ -83,5 +85,7 @@ jobs:
       - name: Audit dependencies
         run: composer audit --locked --no-interaction
 
-      - name: Run database integration tests
+      - name: Run database integration and real consumer acceptance
+        env:
+          MIGRAFOLD_CONSUMER_LARAVEL: ${{ matrix.laravel }}
         run: composer test:databases
