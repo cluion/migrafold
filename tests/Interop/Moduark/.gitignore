@@ -1,0 +1,5 @@
+/*/.env
+/*/composer.lock
+/*/vendor/
+/*/bootstrap/cache/*.php
+!/*/bootstrap/cache/.gitignore

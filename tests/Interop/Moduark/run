@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+
+set -eu
+
+interop_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+for suite in Laravel12 Laravel13; do
+    suite_root="$interop_root/$suite"
+    test_database="/private/tmp/migrafold_moduark_$(printf '%s' "$suite" | tr '[:upper:]' '[:lower:]')_testing"
+
+    if [ ! -f "$suite_root/.env" ]; then
+        cp "$suite_root/.env.example" "$suite_root/.env"
+    fi
+
+    composer install --working-dir="$suite_root" --no-interaction --prefer-dist
+    touch "$test_database"
+
+    (
+        cd "$suite_root"
+
+        if command -v safe-laravel-test >/dev/null 2>&1; then
+            safe-laravel-test --runner=phpunit
+        else
+            vendor/bin/phpunit
+        fi
+    )
+done

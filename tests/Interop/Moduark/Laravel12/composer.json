@@ -1,0 +1,43 @@
+{
+    "name": "cluion/migrafold-moduark-laravel-12-interop",
+    "description": "Isolated Moduark interoperability harness for Migrafold on Laravel 12.",
+    "type": "project",
+    "license": "MIT",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../../..",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "cluion/migrafold": "dev-main",
+        "cluion/moduark": "^1.3",
+        "laravel/framework": "^12.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^10.0",
+        "phpunit/phpunit": "^11.5 || ^12.5 || ^13.0"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "MigrafoldInterop\\Moduark\\": "../src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": [
+                "cluion/migrafold",
+                "cluion/moduark"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
