@@ -38,8 +38,16 @@ final readonly class DatabaseMigrationRecordTransaction implements MigrationReco
     private function sqlite(Connection $connection, Closure $callback): mixed
     {
         try {
-            $connection->unprepared('BEGIN IMMEDIATE');
+            if (! $connection->unprepared('BEGIN IMMEDIATE')) {
+                throw MigrationRecordActivationFailed::because(
+                    'could not acquire the SQLite migration-record write lock.',
+                );
+            }
         } catch (Throwable $exception) {
+            if ($exception instanceof MigrationRecordActivationFailed) {
+                throw $exception;
+            }
+
             throw MigrationRecordActivationFailed::because(
                 'could not acquire the SQLite migration-record write lock.',
                 $exception,
@@ -48,12 +56,26 @@ final readonly class DatabaseMigrationRecordTransaction implements MigrationReco
 
         try {
             $result = $callback();
-            $connection->getPdo()->commit();
+
+            if (! $connection->unprepared('COMMIT')) {
+                throw MigrationRecordActivationFailed::because(
+                    'the SQLite migration-record transaction could not be committed.',
+                );
+            }
 
             return $result;
         } catch (Throwable $exception) {
-            if ($connection->getPdo()->inTransaction()) {
-                $connection->getPdo()->rollBack();
+            try {
+                if (! $connection->unprepared('ROLLBACK')) {
+                    throw MigrationRecordActivationFailed::because(
+                        'the SQLite migration-record transaction could not be rolled back.',
+                    );
+                }
+            } catch (Throwable $rollbackFailure) {
+                throw MigrationRecordActivationFailed::because(
+                    'the SQLite migration-record transaction failed and rollback could not complete.',
+                    $rollbackFailure,
+                );
             }
 
             throw $exception;

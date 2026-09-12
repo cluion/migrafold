@@ -12,7 +12,7 @@
         <env name="APP_ENV" value="testing" force="true"/>
         <env name="APP_KEY" value="base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="/>
         <env name="DB_CONNECTION" value="testing" force="true"/>
-        <env name="DB_DATABASE" value="/private/tmp/migrafold_nwidart_laravel12_testing" force="true"/>
+        <env name="DB_DATABASE" value="/tmp/migrafold_nwidart_laravel12_testing"/>
         <env name="DB_URL" value="" force="true"/>
     </php>
 </phpunit>

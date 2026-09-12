@@ -3,10 +3,11 @@
 set -eu
 
 interop_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+temporary_root=${TMPDIR:-/tmp}
 
 for suite in Laravel12 Laravel13; do
     suite_root="$interop_root/$suite"
-    test_database="/private/tmp/migrafold_moduark_$(printf '%s' "$suite" | tr '[:upper:]' '[:lower:]')_testing"
+    test_database="$temporary_root/migrafold_moduark_$(printf '%s' "$suite" | tr '[:upper:]' '[:lower:]')_testing"
 
     if [ ! -f "$suite_root/.env" ]; then
         cp "$suite_root/.env.example" "$suite_root/.env"
@@ -19,9 +20,9 @@ for suite in Laravel12 Laravel13; do
         cd "$suite_root"
 
         if command -v safe-laravel-test >/dev/null 2>&1; then
-            safe-laravel-test --runner=phpunit
+            DB_DATABASE="$test_database" safe-laravel-test --runner=phpunit
         else
-            vendor/bin/phpunit
+            DB_DATABASE="$test_database" vendor/bin/phpunit
         fi
     )
 done
