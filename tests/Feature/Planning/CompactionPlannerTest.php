@@ -109,6 +109,46 @@ final class CompactionPlannerTest extends TestCase
             '"data_state_compared":false',
             json_encode($summary['analysis'], JSON_THROW_ON_ERROR),
         );
+        $manifest = json_decode(
+            $plan->output->owners[0]->output->manifestContents,
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($manifest);
+        self::assertSame('migrafold-manifest-v2', $manifest['format_version']);
+        self::assertSame([
+            'mode' => 'same-engine-dual-sandbox',
+            'driver' => 'sqlite',
+            'schema_fingerprints' => [
+                'source_replay' => $plan->snapshot->fingerprint(),
+                'baseline_replay' => $plan->snapshot->fingerprint(),
+                'current_database' => $plan->snapshot->fingerprint(),
+            ],
+            'migration_counts' => [
+                'source' => 2,
+                'baseline' => 1,
+                'preserved' => 1,
+            ],
+            'data_state_compared' => false,
+        ], $manifest['verification']);
+        self::assertSame([
+            'compacted' => [[
+                'name' => '2020_01_01_000000_create_users_table',
+                'owner' => 'laravel:application',
+                'path' => 'database/migrations/2020_01_01_000000_create_users_table.php',
+                'sha256' => hash_file('sha256', $schemaSource),
+                'classification' => 'schema_only',
+                'action' => 'compact',
+            ]],
+            'preserved' => [[
+                'name' => '2030_01_01_000000_seed_system_user',
+                'owner' => 'laravel:application',
+                'path' => 'database/migrations/2030_01_01_000000_seed_system_user.php',
+                'sha256' => hash_file('sha256', $dataSource),
+                'classification' => 'data_only',
+                'action' => 'preserve',
+            ]],
+        ], $manifest['migration_scope']);
         self::assertFileExists($dataSource);
         self::assertStringNotContainsString($dataSource, json_encode($plan->disposition, JSON_THROW_ON_ERROR));
     }

@@ -130,6 +130,7 @@ final class PlanCommand extends Command
         $this->line("Plan fingerprint: {$summary['plan_fingerprint']}");
         $this->line("Database: {$schema['driver']}");
         $this->line("Schema fingerprint: {$schema['fingerprint']}");
+        $this->line("Replay verification: {$summary['verification']['mode']}");
         $this->line("Tables: {$schema['tables']}");
         $this->line("Source disposition: {$summary['source_disposition']}");
         $this->line("Migration table: {$summary['records']['table']}");

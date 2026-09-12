@@ -9,6 +9,7 @@ use Cluion\Migrafold\Analysis\MigrationAnalysisReport;
 use Cluion\Migrafold\Analysis\MigrationCompactionAction;
 use Cluion\Migrafold\Discovery\MigrationCatalog;
 use Cluion\Migrafold\Disposition\SourceDispositionPlan;
+use Cluion\Migrafold\Output\BaselineManifestAudit;
 use Cluion\Migrafold\Output\OwnerAwareOutputPlan;
 use Cluion\Migrafold\Schema\Definition\SchemaSnapshot;
 use JsonException;
@@ -22,6 +23,7 @@ final readonly class CompactionPlan
         public OwnerAwareOutputPlan $output,
         public SourceDispositionPlan $disposition,
         public MigrationRecordActivationPlan $activation,
+        public BaselineManifestAudit $audit,
         public string $migrationTable = 'migrations',
     ) {}
 
@@ -77,6 +79,7 @@ final readonly class CompactionPlan
             'schema' => $this->snapshot->fingerprint(),
             'project_root' => $this->disposition->projectRoot,
             'migration_table' => $this->migrationTable,
+            'audit' => $this->audit->toArray(),
             'sources' => $sources,
             'outputs' => $outputs,
             'disposition' => [
@@ -99,6 +102,7 @@ final readonly class CompactionPlan
      * @return array{
      *     plan_fingerprint: string,
      *     schema: array{driver: string, fingerprint: string, tables: int},
+     *     verification: array{mode: string, driver: string, schema_fingerprints: array{source_replay: string, baseline_replay: string, current_database: string}, migration_counts: array{source: int, baseline: int, preserved: int}, data_state_compared: false},
      *     source_disposition: string,
      *     analysis: array{compact: list<string>, preserve: list<string>, block: list<string>, data_state_compared: false},
      *     owners: list<array{id: string, name: string, directory: string, sources: list<string>, baselines: list<string>}>,
@@ -108,6 +112,7 @@ final readonly class CompactionPlan
     public function summary(): array
     {
         $owners = [];
+        $audit = $this->audit->toArray();
 
         foreach ($this->output->owners as $owner) {
             $disposedSources = array_values(array_filter(
@@ -136,6 +141,7 @@ final readonly class CompactionPlan
                 'fingerprint' => $this->snapshot->fingerprint(),
                 'tables' => count($this->snapshot->tables),
             ],
+            'verification' => $audit['verification'],
             'source_disposition' => $this->disposition->mode->value,
             'analysis' => [
                 'compact' => $this->analysisNames(MigrationCompactionAction::Compact),

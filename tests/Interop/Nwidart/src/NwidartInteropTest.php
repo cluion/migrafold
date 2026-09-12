@@ -207,6 +207,7 @@ PHP,
         $source = $root.'/Modules/Billing/database/migrations/2020_01_01_000000_create_invoices_table.php';
         $baselineName = $plan->activation->baselineNames()[0];
         $archive = $plan->disposition->items[0]->destination;
+        $manifestPath = dirname($source).'/.migrafold-manifest.json';
 
         self::assertCount(2, $adapters);
         self::assertSame('nwidart:Billing', $plan->output->owners[0]->ownerId);
@@ -223,7 +224,13 @@ PHP,
         self::assertFileDoesNotExist($source);
         self::assertFileExists($archive);
         self::assertFileExists(dirname($source).'/'.$baselineName.'.php');
-        self::assertFileExists(dirname($source).'/.migrafold-manifest.json');
+        self::assertFileExists($manifestPath);
+        $manifest = json_decode((string) file_get_contents($manifestPath), true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($manifest);
+        self::assertSame('migrafold-manifest-v2', $manifest['format_version']);
+        self::assertSame('nwidart:Billing', $manifest['migration_scope']['compacted'][0]['owner']);
+        self::assertSame([], $manifest['migration_scope']['preserved']);
+        self::assertSame('sqlite', $manifest['verification']['driver']);
         self::assertSame(
             [$baselineName],
             $this->connection()->table('migrations')->pluck('migration')->all(),

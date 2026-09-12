@@ -164,6 +164,32 @@ final class MySqlReplayVerifierTest extends TestCase
             ['2030_01_01_000000_seed_system_user'],
             $plan->summary()['analysis']['preserve'],
         );
+        $manifest = json_decode(
+            $plan->output->owners[0]->output->manifestContents,
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($manifest);
+        self::assertSame('migrafold-manifest-v2', $manifest['format_version']);
+        $verification = $manifest['verification'] ?? null;
+        self::assertIsArray($verification);
+        self::assertSame(
+            $this->environment('MIGRAFOLD_DB_DRIVER'),
+            $verification['driver'],
+        );
+        self::assertSame([
+            'source_replay' => $plan->snapshot->fingerprint(),
+            'baseline_replay' => $plan->snapshot->fingerprint(),
+            'current_database' => $plan->snapshot->fingerprint(),
+        ], $verification['schema_fingerprints']);
+        $migrationScope = $manifest['migration_scope'] ?? null;
+        self::assertIsArray($migrationScope);
+        $preserved = $migrationScope['preserved'] ?? null;
+        self::assertIsArray($preserved);
+        self::assertSame(
+            ['2030_01_01_000000_seed_system_user'],
+            array_column($preserved, 'name'),
+        );
         self::assertSame([], $this->sandboxDatabases());
         $this->assertDirectoryIsEmpty($temporaryRoot);
     }

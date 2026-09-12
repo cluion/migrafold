@@ -26,7 +26,7 @@ The current implementation includes:
 - A read-only MySQL/MariaDB inspector with real-server coverage and fail-closed detection for schema details that are not yet representable.
 - Canonical, deterministic JSON snapshots with SHA-256 fingerprints and an explicit capability report.
 - A deterministic per-table PHP migration generator with dependency ordering, existing-table guards, and irreversible rollback protection.
-- A dry-run-first output writer with collision refusal, verified file publication, and a deterministic source/output manifest.
+- A dry-run-first output writer with collision refusal, verified file publication, and deterministic manifests.
 - Deterministic migration discovery for Laravel applications, active Moduark Modules, and active nWidart Modules, including explicit table ownership and source fingerprints.
 - Owner-aware output planning with per-owner manifests, global dry-run preflight, and rollback across application and Module directories.
 - Manifest-protected source archival or explicit deletion with fingerprint revalidation and cross-owner rollback.
@@ -37,6 +37,7 @@ The current implementation includes:
 - Catalog-wide AST classification that compacts schema-only migrations, preserves data-only migrations, and blocks mixed, raw, dynamic, unsupported, or invalid migrations.
 - SQLite, MySQL, and MariaDB source/baseline replay in separate temporary databases, including current-database fingerprint verification and baseline-before-preserved ordering checks.
 - Exact compacted scope propagation: preserved migrations remain in place and their migration records are not retired.
+- Planner-generated v2 manifests that record the global compacted/preserved migration scope and same-engine replay fingerprints without database credentials or temporary sandbox identities.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
 ## Preview a compaction
@@ -52,6 +53,8 @@ Use `--json` for machine-readable output or `--delete` to preview permanent sour
 SQLite sandboxes are local temporary files. MySQL and MariaDB sandboxes are separate databases on the selected server, created with a fixed `migrafold_replay_` prefix and random identity. Cleanup requires the expected name, token, server identity, and database-resident ownership marker to match. The selected database account must be allowed to create and drop databases. Cross-database foreign keys, active source transactions, and non-empty table prefixes fail closed.
 
 The plan output includes a fingerprint covering the schema, source fingerprints, migration classifications and actions, owner paths, generated outputs, source disposition, migration table, and record replacement scope. Data-only migrations are reported under `analysis.preserve`; their row data is replayed for execution safety but is not compared for equality.
+
+Every application or Module directory receiving baselines also receives a `migrafold-manifest-v2` file. It records the globally verified compacted and preserved migration entries, their source fingerprints and owners, source/baseline/current schema fingerprints, migration counts, and the same-engine replay mode. Temporary database names, server addresses, and credentials are not persisted.
 
 ## Execute a compaction
 

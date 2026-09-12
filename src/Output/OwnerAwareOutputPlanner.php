@@ -24,10 +24,13 @@ final readonly class OwnerAwareOutputPlanner
         SchemaSnapshot $snapshot,
         array $migrations,
         MigrationCatalog $catalog,
+        ?BaselineManifestAudit $audit = null,
     ): OwnerAwareOutputPlan {
         if ($migrations === []) {
             throw UnsafeOutputOperation::because('at least one generated migration is required.');
         }
+
+        $audit?->assertOutputScope($catalog, $migrations);
 
         /** @var array<string, list<GeneratedMigration>> $migrationsByOwner */
         $migrationsByOwner = [];
@@ -96,6 +99,7 @@ final readonly class OwnerAwareOutputPlanner
                     $ownerMigrations,
                     $catalog->sourcesFor($owner->id),
                     new BaselineManifestOwner($owner->id, $owner->name),
+                    $audit,
                 ),
             );
         }

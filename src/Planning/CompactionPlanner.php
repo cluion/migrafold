@@ -10,6 +10,7 @@ use Cluion\Migrafold\Discovery\MigrationDiscoverer;
 use Cluion\Migrafold\Discovery\MigrationSourceAdapter;
 use Cluion\Migrafold\Disposition\SourceDispositionMode;
 use Cluion\Migrafold\Disposition\SourceDispositionPlanner;
+use Cluion\Migrafold\Output\BaselineManifestAudit;
 use Cluion\Migrafold\Output\OwnerAwareOutputPlanner;
 use Cluion\Migrafold\Output\OwnerAwareOutputWriter;
 use Cluion\Migrafold\Replay\ReplayVerifierResolver;
@@ -47,7 +48,13 @@ final readonly class CompactionPlanner
         );
         $this->comparator->assertEquivalent($replay->source, $snapshot, 'source replay', 'current database');
         $scope = new MigrationCompactionScope($catalog, $replay->analysis);
-        $output = $this->outputPlanner->plan($snapshot, $replay->baselines, $scope->compacted);
+        $audit = BaselineManifestAudit::fromReplay($replay, $snapshot);
+        $output = $this->outputPlanner->plan(
+            $snapshot,
+            $replay->baselines,
+            $scope->compacted,
+            $audit,
+        );
 
         // This checks every owner directory and output collision without writing files.
         $this->outputWriter->execute($output);
@@ -68,6 +75,7 @@ final readonly class CompactionPlanner
             $output,
             $sourceDisposition,
             $activation,
+            $audit,
             $migrationTable,
         );
     }

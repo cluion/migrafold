@@ -159,6 +159,7 @@ final class ModuarkInteropTest extends TestCase
         );
         $baselineName = $plan->activation->baselineNames()[0];
         $archive = $plan->disposition->items[0]->destination;
+        $manifestPath = $moduleDirectory.'/.migrafold-manifest.json';
 
         self::assertCount(2, $adapters);
         self::assertSame('moduark:Billing', $plan->output->owners[0]->ownerId);
@@ -175,7 +176,13 @@ final class ModuarkInteropTest extends TestCase
         self::assertFileDoesNotExist($source);
         self::assertFileExists($archive);
         self::assertFileExists($moduleDirectory.'/'.$baselineName.'.php');
-        self::assertFileExists($moduleDirectory.'/.migrafold-manifest.json');
+        self::assertFileExists($manifestPath);
+        $manifest = json_decode((string) file_get_contents($manifestPath), true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($manifest);
+        self::assertSame('migrafold-manifest-v2', $manifest['format_version']);
+        self::assertSame('moduark:Billing', $manifest['migration_scope']['compacted'][0]['owner']);
+        self::assertSame([], $manifest['migration_scope']['preserved']);
+        self::assertSame('sqlite', $manifest['verification']['driver']);
         self::assertSame(
             [$baselineName],
             $this->connection()->table('migrations')->pluck('migration')->all(),

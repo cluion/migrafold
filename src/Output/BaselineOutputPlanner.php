@@ -22,13 +22,14 @@ final class BaselineOutputPlanner
         array $migrations,
         array $sources,
         ?BaselineManifestOwner $owner = null,
+        ?BaselineManifestAudit $audit = null,
     ): BaselineOutputPlan {
         $directory = $this->normalizeDirectory($directory);
         $files = $this->migrationFiles($migrations);
         $sources = $this->normalizeSources($sources);
 
         $manifest = [
-            'format_version' => 'migrafold-manifest-v1',
+            'format_version' => $audit === null ? 'migrafold-manifest-v1' : 'migrafold-manifest-v2',
             'schema' => [
                 'format_version' => $snapshot->formatVersion,
                 'driver' => $snapshot->driver,
@@ -46,6 +47,10 @@ final class BaselineOutputPlanner
 
         if ($owner !== null) {
             $manifest['owner'] = $owner->toArray();
+        }
+
+        if ($audit !== null) {
+            $manifest = array_merge($manifest, $audit->toArray());
         }
 
         $contents = json_encode(
