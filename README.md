@@ -2,7 +2,7 @@
 
 Migrafold folds Laravel migration history into verified, deploy-safe baseline migrations.
 
-> Status: pre-alpha feasibility work. No compaction or production mutation command is available yet.
+> Status: pre-alpha feasibility work. A read-only planning command is available; no production mutation command is available yet.
 
 ## Product boundary
 
@@ -31,7 +31,20 @@ The current implementation includes:
 - Owner-aware output planning with per-owner manifests, global dry-run preflight, and rollback across application and Module directories.
 - Manifest-protected source archival or explicit deletion with fingerprint revalidation and cross-owner rollback.
 - Transactional, lock-protected migration-record activation that replaces only the exact retired scope and preserves unrelated history.
+- An end-to-end `migrafold:plan` command with human-readable and JSON output, automatic Moduark runtime discovery, and no filesystem or migration-record writes.
 - Fail-closed detection for schema features that cannot yet be represented safely.
+
+## Preview a compaction
+
+```bash
+php artisan migrafold:plan \
+    --date=2026_09_12 \
+    --archive-id=2026-09-12T120000Z
+```
+
+Use `--json` for machine-readable output or `--delete` to preview permanent source deletion. The command only inspects the selected database connection and migration sources; it does not create, move, delete, or activate anything.
+
+When all three Moduark runtime services are available, active Module migration directories and table ownership are included automatically. A partial Moduark runtime fails closed instead of silently producing an incomplete plan.
 
 ## Development
 
