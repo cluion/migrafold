@@ -32,6 +32,7 @@ The current implementation includes:
 - Manifest-protected source archival or explicit deletion with fingerprint revalidation and cross-owner rollback.
 - Transactional, lock-protected migration-record activation that replaces only the exact retired scope and preserves unrelated history.
 - An end-to-end `migrafold:plan` command with human-readable and JSON output, automatic Moduark runtime discovery, and no filesystem or migration-record writes.
+- A recoverable execution coordinator that retains private source checkpoints until record activation commits and compensates filesystem changes on failure.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
 ## Preview a compaction
