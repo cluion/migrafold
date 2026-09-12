@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+
+set -eu
+
+consumer_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_root=$(CDPATH= cd -- "$consumer_root/../.." && pwd)
+temporary_root=${TMPDIR:-/tmp}
+workspace=$(mktemp -d "$temporary_root/migrafold-consumer.XXXXXX")
+artifact_root="$workspace/artifact"
+
+cleanup() {
+    rm -rf "$workspace"
+}
+
+trap cleanup EXIT INT TERM
+
+mkdir "$artifact_root"
+git -C "$project_root" archive --format=tar --output="$workspace/migrafold.tar" HEAD
+tar -xf "$workspace/migrafold.tar" -C "$artifact_root"
+
+if [ -e "$artifact_root/.git" ] || [ -e "$artifact_root/.internal" ] || [ -e "$artifact_root/tests" ]; then
+    echo 'Consumer artifact contains development-only files.' >&2
+    exit 1
+fi
+
+for suite in Laravel12 Laravel13; do
+    suite_root="$workspace/$suite"
+    database="$workspace/migrafold_$(printf '%s' "$suite" | tr '[:upper:]' '[:lower:]')_consumer_testing"
+
+    mkdir "$suite_root"
+    cp -R "$consumer_root/App/." "$suite_root"
+    cp "$consumer_root/$suite/composer.json" "$suite_root/composer.json"
+
+    composer install --working-dir="$suite_root" --no-interaction --no-progress --prefer-dist
+    composer audit --locked --no-interaction --working-dir="$suite_root"
+
+    package_root="$suite_root/vendor/cluion/migrafold"
+
+    if [ ! -d "$package_root" ] || [ -L "$package_root" ]; then
+        echo "$suite did not install an independent Migrafold package copy." >&2
+        exit 1
+    fi
+
+    touch "$database"
+
+    (
+        cd "$suite_root"
+        APP_ENV=testing \
+        APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+        DB_CONNECTION=sqlite \
+        DB_DATABASE="$database" \
+        DB_URL= \
+        php accept.php
+    )
+done

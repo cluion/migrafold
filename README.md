@@ -109,6 +109,7 @@ Types or modifiers without a lossless Blueprint representation stop generation w
 ```bash
 composer install
 composer test
+composer test:consumer
 composer analyse
 composer test:databases
 composer test:moduark
@@ -116,6 +117,8 @@ composer test:nwidart
 ```
 
 The default tests use an in-memory SQLite database. Database integration tests start isolated MySQL 8.0 and MariaDB 11.8 containers, accept only dedicated `*_testing` databases, and remove their containers and storage after the run.
+
+Consumer acceptance exports the current Git commit, installs a non-symlinked package copy into isolated Laravel 12 and 13 applications, and verifies automatic package discovery, planning, archival compaction, exact migration-record activation, and fresh baseline replay. Development-only files and local uncommitted changes are excluded from the package under test.
 
 The Moduark interoperability tests install isolated matching-major dependency sets for Laravel 12 and 13 with the current stable Moduark 1.x release. Each harness exercises the official registry, resource manifest, and table ownership runtime through baseline publication, source archival, and migration-record activation.
 

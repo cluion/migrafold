@@ -1,0 +1,34 @@
+{
+    "name": "cluion/migrafold-consumer-laravel-12",
+    "description": "Clean-package consumer acceptance for Migrafold on Laravel 12.",
+    "type": "project",
+    "license": "MIT",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../artifact",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "cluion/migrafold": "dev-main"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "cluion/migrafold": "dev-main",
+        "laravel/framework": "^12.0"
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ]
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

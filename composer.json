@@ -52,6 +52,7 @@
             "@prepare",
             "@php vendor/bin/phpunit"
         ],
+        "test:consumer": "tests/Consumer/run",
         "test:databases": "tests/run-database-tests",
         "test:moduark": "tests/Interop/Moduark/run",
         "test:nwidart": "tests/Interop/Nwidart/run",
