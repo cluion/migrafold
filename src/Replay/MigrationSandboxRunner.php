@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cluion\Migrafold\Replay;
 
+use Closure;
 use Cluion\Migrafold\Contracts\SchemaInspector;
 use Cluion\Migrafold\Replay\Exception\ReplayVerificationFailed;
 use Cluion\Migrafold\Schema\Definition\SchemaSnapshot;
@@ -38,8 +39,8 @@ final readonly class MigrationSandboxRunner
             $repository = new DatabaseMigrationRepository($this->databases, $migrationTable);
             $migrator = new Migrator($repository, $this->databases, $this->files);
 
-            /** @var list<string> $ran */
-            [$ran, $snapshot] = $migrator->usingConnection(
+            $result = $this->runUsingConnection(
+                $migrator,
                 $connectionName,
                 function () use (
                     $repository,
@@ -75,6 +76,29 @@ final readonly class MigrationSandboxRunner
                     return [$ran, $inspector->inspect($connection, $excludedTables)];
                 },
             );
+
+            if (! is_array($result)
+                || ! array_is_list($result)
+                || count($result) !== 2
+                || ! is_array($result[0])
+                || ! array_is_list($result[0])
+                || ! $result[1] instanceof SchemaSnapshot) {
+                throw ReplayVerificationFailed::because(
+                    "{$label} sandbox returned an invalid replay result.",
+                );
+            }
+
+            $ran = $result[0];
+            $snapshot = $result[1];
+
+            foreach ($ran as $path) {
+                if (! is_string($path)) {
+                    throw ReplayVerificationFailed::because(
+                        "{$label} sandbox returned an invalid migration path.",
+                    );
+                }
+            }
+
             $expectedMigrations = array_sum(array_map('count', $migrationGroups));
 
             if (count($ran) !== $expectedMigrations) {
@@ -92,5 +116,19 @@ final readonly class MigrationSandboxRunner
                 $exception,
             );
         }
+    }
+
+    /**
+     * Laravel 12 declares the callback result as mixed while Laravel 13
+     * specializes it through PHPDoc. Keep one runtime-validated boundary.
+     *
+     * @param Closure(): array{list<string>, SchemaSnapshot} $callback
+     */
+    private function runUsingConnection(
+        Migrator $migrator,
+        string $connectionName,
+        Closure $callback,
+    ): mixed {
+        return $migrator->usingConnection($connectionName, $callback);
     }
 }
