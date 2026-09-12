@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- PostgreSQL schema inspection with lossless Laravel Blueprint rendering for supported native types, defaults, indexes, foreign keys, and generated baseline migrations.
+- Same-engine PostgreSQL replay verification in isolated databases with guarded ownership markers and deterministic cleanup.
+- PostgreSQL migration-record activation using transaction-scoped advisory locks with commit, rollback, contention, and timeout coverage.
+
+### Changed
+
+- Extend real-database acceptance to PostgreSQL 16 and 17 across Laravel 12 and 13, including application, Moduark, and nWidart migration ownership.
+- Exercise both archive and permanently confirmed deletion flows in PostgreSQL clean-package consumer acceptance.
+
+### Safety
+
+- Fail closed for unsupported PostgreSQL schemas, non-`public` search paths, cross-schema references, unavailable server identity, replay drift, and contended activation locks.
+
+## [0.1.2] - 2026-09-12
+
+### Fixed
+
+- Generate native MariaDB UUID columns without misclassifying their physical representation during baseline rendering.
+
+### Added
+
+- Real MySQL and MariaDB clean-package consumer acceptance across Laravel 12 and 13 with 78 migrations distributed between the application, Moduark, and nWidart owners.
+- End-to-end archive, migration-record activation, installed-state verification, and fresh baseline replay coverage against disposable database containers.
+
 ## [0.1.1]
 
 ### Fixed
@@ -37,6 +63,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Keep recoverable source checkpoints until migration-record activation commits.
 - Verify installed baselines, manifests, migration records, and current schema without mutating them.
 
-[Unreleased]: https://github.com/cluion/migrafold/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/cluion/migrafold/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/cluion/migrafold/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/cluion/migrafold/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/cluion/migrafold/releases/tag/v0.1.0
