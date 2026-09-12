@@ -17,7 +17,12 @@ final readonly class LaravelSchemaMetadataMapper
     public function __construct(private string $platform) {}
 
     /** @param array<string, mixed> $metadata */
-    public function table(Builder $schema, array $metadata, string $qualifiedName): TableDefinition
+    public function table(
+        Builder $schema,
+        array $metadata,
+        string $qualifiedName,
+        ?string $localSchema = null,
+    ): TableDefinition
     {
         $columns = array_map(
             fn (array $column): ColumnDefinition => $this->column($column),
@@ -32,6 +37,7 @@ final readonly class LaravelSchemaMetadataMapper
         foreach ($schema->getForeignKeys($qualifiedName) as $foreignKey) {
             $foreignKeys[] = $this->foreignKey(
                 $this->metadataArray($foreignKey, 'foreign-key'),
+                $localSchema,
             );
         }
 
@@ -46,7 +52,10 @@ final readonly class LaravelSchemaMetadataMapper
 
         return new TableDefinition(
             name: $this->string($metadata, 'name'),
-            schema: $this->nullableString($metadata, 'schema'),
+            schema: $this->localSchema(
+                $this->nullableString($metadata, 'schema'),
+                $localSchema,
+            ),
             collation: $this->nullableString($metadata, 'collation'),
             engine: $this->nullableString($metadata, 'engine'),
             comment: $this->nullableString($metadata, 'comment'),
@@ -100,17 +109,29 @@ final readonly class LaravelSchemaMetadataMapper
     }
 
     /** @param array<array-key, mixed> $metadata */
-    private function foreignKey(array $metadata): ForeignKeyDefinition
+    private function foreignKey(array $metadata, ?string $localSchema): ForeignKeyDefinition
     {
         return new ForeignKeyDefinition(
             name: $this->nullableString($metadata, 'name'),
             columns: $this->stringList($metadata, 'columns'),
-            foreignSchema: $this->nullableString($metadata, 'foreign_schema'),
+            foreignSchema: $this->localSchema(
+                $this->nullableString($metadata, 'foreign_schema'),
+                $localSchema,
+            ),
             foreignTable: $this->string($metadata, 'foreign_table'),
             foreignColumns: $this->stringList($metadata, 'foreign_columns'),
             onUpdate: $this->nullableString($metadata, 'on_update'),
             onDelete: $this->nullableString($metadata, 'on_delete'),
         );
+    }
+
+    private function localSchema(?string $schema, ?string $localSchema): ?string
+    {
+        if ($schema !== null && $localSchema !== null && strcasecmp($schema, $localSchema) === 0) {
+            return null;
+        }
+
+        return $schema;
     }
 
     /** @param array<array-key, mixed> $metadata */

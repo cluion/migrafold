@@ -35,7 +35,7 @@ The current implementation includes:
 - A recoverable execution coordinator that retains private source checkpoints until record activation commits and compensates filesystem changes on failure.
 - An explicitly confirmed `migrafold:compact` command with whole-plan fingerprint binding and a second confirmation for permanent deletion.
 - Catalog-wide AST classification that compacts schema-only migrations, preserves data-only migrations, and blocks mixed, raw, dynamic, unsupported, or invalid migrations.
-- SQLite source/baseline replay in separate temporary databases, including current-database fingerprint verification and baseline-before-preserved ordering checks.
+- SQLite, MySQL, and MariaDB source/baseline replay in separate temporary databases, including current-database fingerprint verification and baseline-before-preserved ordering checks.
 - Exact compacted scope propagation: preserved migrations remain in place and their migration records are not retired.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
@@ -47,9 +47,9 @@ php artisan migrafold:plan \
     --archive-id=2026-09-12T120000Z
 ```
 
-Use `--json` for machine-readable output or `--delete` to preview permanent source deletion. On SQLite, the command replays source and generated migrations in task-specific temporary databases, then removes them. It does not change the selected database, move or delete source files, publish baselines, or activate migration records.
+Use `--json` for machine-readable output or `--delete` to preview permanent source deletion. The command replays source and generated migrations in task-specific temporary databases, then removes them. It does not change the selected database, move or delete source files, publish baselines, or activate migration records.
 
-Planning currently permits execution only on SQLite because its same-engine replay verifier is connected end to end. MySQL and MariaDB inspection and generation remain covered independently, but planning fails closed until their isolated replay resolver is implemented.
+SQLite sandboxes are local temporary files. MySQL and MariaDB sandboxes are separate databases on the selected server, created with a fixed `migrafold_replay_` prefix and random identity. Cleanup requires the expected name, token, server identity, and database-resident ownership marker to match. The selected database account must be allowed to create and drop databases. Cross-database foreign keys, active source transactions, and non-empty table prefixes fail closed.
 
 The plan output includes a fingerprint covering the schema, source fingerprints, migration classifications and actions, owner paths, generated outputs, source disposition, migration table, and record replacement scope. Data-only migrations are reported under `analysis.preserve`; their row data is replayed for execution safety but is not compared for equality.
 

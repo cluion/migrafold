@@ -50,7 +50,19 @@ final class MySqlSchemaInspector implements SchemaInspector
                 continue;
             }
 
-            $tables[] = $mapper->table($schema, $metadata, $database.'.'.$name);
+            $table = $mapper->table($schema, $metadata, $database.'.'.$name, $database);
+
+            foreach ($table->foreignKeys as $foreignKey) {
+                if ($foreignKey->foreignSchema !== null) {
+                    throw $this->unsupported(
+                        $connection,
+                        'cross_schema_foreign_key',
+                        $table->name.'.'.($foreignKey->name ?? 'unnamed'),
+                    );
+                }
+            }
+
+            $tables[] = $table;
         }
 
         usort(
@@ -82,6 +94,7 @@ final class MySqlSchemaInspector implements SchemaInspector
                 unsupported: [
                     'check_constraints',
                     'column_on_update',
+                    'cross_schema_foreign_keys',
                     'descending_indexes',
                     'expression_indexes',
                     'index_comments',

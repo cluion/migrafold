@@ -98,14 +98,16 @@ final class MySqlSchemaInspectorTest extends TestCase
         self::assertSame($snapshot->toJson(), $again->toJson());
         self::assertSame($snapshot->fingerprint(), $again->fingerprint());
         self::assertSame([
-            'mysql' => '837680e28296046d7fd4008f085ca92ee45616fe4bf854ebb71ebcb8c4ba9952',
-            'mariadb' => 'e7657e7b6cafc3ff1ad5f1b88f9f8c3fa71dcef23cf41ad1dbe88c74b73d308b',
+            'mysql' => '6b494028c4cae3c76b90629d4e974c9afb4b75382bfe28efcc165d62eb8b0562',
+            'mariadb' => '3bd3277862124cc1b0c1a7e32afdbc2c0c68b8803927b3619be03e47f188a606',
         ][$snapshot->driver], $snapshot->fingerprint());
         self::assertContains('named_foreign_keys', $snapshot->capabilities->supported);
+        self::assertContains('cross_schema_foreign_keys', $snapshot->capabilities->unsupported);
         self::assertContains('index_prefix_lengths', $snapshot->capabilities->unsupported);
 
         $users = $snapshot->tables[1];
 
+        self::assertNull($users->schema);
         self::assertSame('InnoDB', $users->engine);
         self::assertSame('Application users', $users->comment);
         self::assertSame(
@@ -123,6 +125,7 @@ final class MySqlSchemaInspectorTest extends TestCase
         );
         self::assertSame('fulltext', $users->indexes[4]->type);
         self::assertSame('users_role_id_foreign', $users->foreignKeys[0]->name);
+        self::assertNull($users->foreignKeys[0]->foreignSchema);
         self::assertSame('cascade', $users->foreignKeys[0]->onUpdate);
         self::assertSame('restrict', $users->foreignKeys[0]->onDelete);
     }

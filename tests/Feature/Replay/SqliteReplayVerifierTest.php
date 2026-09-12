@@ -259,10 +259,10 @@ PHP,
     public function test_resolver_fails_closed_when_same_engine_replay_is_unavailable(): void
     {
         $connection = $this->createStub(Connection::class);
-        $connection->method('getDriverName')->willReturn('mysql');
+        $connection->method('getDriverName')->willReturn('pgsql');
 
         $this->expectException(ReplayVerificationFailed::class);
-        $this->expectExceptionMessage('same-engine replay is not implemented for [mysql]');
+        $this->expectExceptionMessage('same-engine replay is not implemented for [pgsql]');
 
         (new ReplayVerifierResolver($this->databases(), new Filesystem()))->resolve($connection);
     }

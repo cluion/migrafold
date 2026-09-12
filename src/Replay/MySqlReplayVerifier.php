@@ -9,21 +9,22 @@ use Cluion\Migrafold\Discovery\MigrationCatalog;
 use Cluion\Migrafold\Migration\BaselineMigrationGenerator;
 use Cluion\Migrafold\Migration\GeneratedMigration;
 use Cluion\Migrafold\Replay\Exception\ReplayVerificationFailed;
-use Cluion\Migrafold\Schema\Definition\SchemaSnapshot;
-use Cluion\Migrafold\Schema\SqliteSchemaInspector;
+use Cluion\Migrafold\Schema\MySqlSchemaInspector;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Filesystem\Filesystem;
+use Throwable;
 
-final readonly class SqliteReplayVerifier implements MigrationReplayVerifier
+final readonly class MySqlReplayVerifier implements MigrationReplayVerifier
 {
-    private const WORKSPACE_PREFIX = 'migrafold-replay-';
+    private const WORKSPACE_PREFIX = 'migrafold-mysql-replay-';
 
     public function __construct(
         private DatabaseManager $databases,
         private Filesystem $files,
+        private Connection $sourceConnection,
         private BaselineMigrationGenerator $generator = new BaselineMigrationGenerator(),
-        private SqliteSchemaInspector $inspector = new SqliteSchemaInspector(),
+        private MySqlSchemaInspector $inspector = new MySqlSchemaInspector(),
         private SchemaReplayComparator $comparator = new SchemaReplayComparator(),
         private MigrationCatalogAnalyzer $analyzer = new MigrationCatalogAnalyzer(),
         private BaselineMigrationOrdering $ordering = new BaselineMigrationOrdering(),
@@ -37,14 +38,21 @@ final readonly class SqliteReplayVerifier implements MigrationReplayVerifier
     ): ReplayVerificationResult {
         $migrations = new ReplayMigrationSet($catalog, $this->analyzer);
         $this->assertMigrationTable($migrationTable);
-        [$workspace, $token] = $this->createWorkspace();
+        [$workspace, $workspaceToken] = $this->createWorkspace();
+        $sandboxes = new MySqlReplaySandboxManager($this->databases, $this->sourceConnection);
+        $sourceSandbox = null;
+        $baselineSandbox = null;
+        $defaultConnection = $this->databases->getDefaultConnection();
 
         try {
-            $source = $this->replay(
+            $sourceSandbox = $sandboxes->create('source');
+            $source = $this->runner()->replay(
+                $sourceSandbox->connection,
+                $sourceSandbox->connectionName,
                 [$migrations->sourcePaths],
-                $workspace.'/source.sqlite',
-                $token.'-source',
                 $migrationTable,
+                [$migrationTable, MySqlReplaySandboxManager::MARKER_TABLE],
+                $this->inspector,
                 'source',
             );
             $baselines = $this->generator->generate($source, $date);
@@ -56,13 +64,15 @@ final readonly class SqliteReplayVerifier implements MigrationReplayVerifier
             }
 
             $this->ordering->assertBaselinesRunFirst($baselines, $migrations->analysis->preserved());
-
             $baselinePaths = $this->writeBaselines($workspace, $baselines);
-            $baseline = $this->replay(
+            $baselineSandbox = $sandboxes->create('baseline');
+            $baseline = $this->runner()->replay(
+                $baselineSandbox->connection,
+                $baselineSandbox->connectionName,
                 [$baselinePaths, $migrations->preservedPaths],
-                $workspace.'/baseline.sqlite',
-                $token.'-baseline',
                 $migrationTable,
+                [$migrationTable, MySqlReplaySandboxManager::MARKER_TABLE],
+                $this->inspector,
                 'baseline',
             );
             $this->comparator->assertEquivalent($source, $baseline);
@@ -77,24 +87,53 @@ final readonly class SqliteReplayVerifier implements MigrationReplayVerifier
                 preservedMigrations: count($migrations->preservedPaths),
             );
         } finally {
-            $this->removeWorkspace($workspace, $token);
+            $cleanupFailure = $this->cleanupSandboxes($sandboxes, $baselineSandbox, $sourceSandbox);
+
+            try {
+                $this->removeWorkspace($workspace, $workspaceToken);
+            } catch (Throwable $exception) {
+                $cleanupFailure ??= $exception;
+            }
+
+            if ($this->databases->getDefaultConnection() !== $defaultConnection) {
+                $this->databases->setDefaultConnection($defaultConnection);
+                $cleanupFailure ??= ReplayVerificationFailed::because(
+                    'default database connection changed during MySQL/MariaDB replay.',
+                );
+            }
+
+            if ($cleanupFailure !== null) {
+                throw ReplayVerificationFailed::because(
+                    'MySQL/MariaDB replay cleanup did not complete safely.',
+                    $cleanupFailure,
+                );
+            }
         }
 
         return $result;
+    }
+
+    private function runner(): MigrationSandboxRunner
+    {
+        return new MigrationSandboxRunner($this->databases, $this->files);
     }
 
     private function assertMigrationTable(string $migrationTable): void
     {
         if (preg_match('/\A[A-Za-z_][A-Za-z0-9_]*\z/', $migrationTable) !== 1) {
             throw ReplayVerificationFailed::because(
-                "migration repository table [{$migrationTable}] is invalid for SQLite replay.",
+                "migration repository table [{$migrationTable}] is invalid for MySQL/MariaDB replay.",
+            );
+        }
+
+        if (strcasecmp($migrationTable, MySqlReplaySandboxManager::MARKER_TABLE) === 0) {
+            throw ReplayVerificationFailed::because(
+                "migration repository table [{$migrationTable}] overlaps the sandbox ownership marker.",
             );
         }
     }
 
-    /**
-     * @return array{0: string, 1: string}
-     */
+    /** @return array{0: string, 1: string} */
     private function createWorkspace(): array
     {
         $configuredRoot = $this->temporaryRoot ?? sys_get_temp_dir();
@@ -148,10 +187,8 @@ final readonly class SqliteReplayVerifier implements MigrationReplayVerifier
         $paths = [];
 
         foreach ($baselines as $baseline) {
-            if (
-                basename($baseline->filename) !== $baseline->filename
-                || ! str_ends_with($baseline->filename, '.php')
-            ) {
+            if (basename($baseline->filename) !== $baseline->filename
+                || ! str_ends_with($baseline->filename, '.php')) {
                 throw ReplayVerificationFailed::because(
                     "generated baseline filename [{$baseline->filename}] is unsafe.",
                 );
@@ -171,46 +208,26 @@ final readonly class SqliteReplayVerifier implements MigrationReplayVerifier
         return $paths;
     }
 
-    /**
-     * @param list<list<string>> $migrationGroups
-     */
-    private function replay(
-        array $migrationGroups,
-        string $databasePath,
-        string $connectionName,
-        string $migrationTable,
-        string $label,
-    ): SchemaSnapshot {
-        if ($this->files->put($databasePath, '') === false) {
-            throw ReplayVerificationFailed::because("{$label} sandbox database could not be created.");
-        }
+    private function cleanupSandboxes(
+        MySqlReplaySandboxManager $manager,
+        ?MySqlReplaySandbox $baseline,
+        ?MySqlReplaySandbox $source,
+    ): ?Throwable {
+        $failure = null;
 
-        try {
-            $resolved = $this->databases->connectUsing($connectionName, [
-                'driver' => 'sqlite',
-                'database' => $databasePath,
-                'prefix' => '',
-                'foreign_key_constraints' => true,
-            ], true);
-
-            if (! $resolved instanceof Connection) {
-                throw ReplayVerificationFailed::because(
-                    "{$label} sandbox did not resolve to a Laravel database connection.",
-                );
+        foreach ([$baseline, $source] as $sandbox) {
+            if ($sandbox === null) {
+                continue;
             }
 
-            return (new MigrationSandboxRunner($this->databases, $this->files))->replay(
-                $resolved,
-                $connectionName,
-                $migrationGroups,
-                $migrationTable,
-                [$migrationTable],
-                $this->inspector,
-                $label,
-            );
-        } finally {
-            $this->databases->purge($connectionName);
+            try {
+                $manager->destroy($sandbox);
+            } catch (Throwable $exception) {
+                $failure ??= $exception;
+            }
         }
+
+        return $failure;
     }
 
     private function removeWorkspace(string $workspace, string $token): void

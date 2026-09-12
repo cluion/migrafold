@@ -20,6 +20,11 @@ final readonly class ReplayVerifierResolver
     {
         return match ($connection->getDriverName()) {
             'sqlite' => new SqliteReplayVerifier($this->databases, $this->files),
+            'mysql', 'mariadb' => new MySqlReplayVerifier(
+                $this->databases,
+                $this->files,
+                $connection,
+            ),
             default => throw ReplayVerificationFailed::because(
                 "same-engine replay is not implemented for [{$connection->getDriverName()}].",
             ),
