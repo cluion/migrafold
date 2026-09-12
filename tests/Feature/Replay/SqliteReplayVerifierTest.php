@@ -10,6 +10,7 @@ use Cluion\Migrafold\Discovery\MigrationCatalog;
 use Cluion\Migrafold\Discovery\MigrationOwner;
 use Cluion\Migrafold\Output\SourceMigration;
 use Cluion\Migrafold\Replay\Exception\ReplayVerificationFailed;
+use Cluion\Migrafold\Replay\PostgresReplayVerifier;
 use Cluion\Migrafold\Replay\ReplayVerifierResolver;
 use Cluion\Migrafold\Replay\SchemaReplayComparator;
 use Cluion\Migrafold\Replay\SqliteReplayVerifier;
@@ -259,12 +260,23 @@ PHP,
     public function test_resolver_fails_closed_when_same_engine_replay_is_unavailable(): void
     {
         $connection = $this->createStub(Connection::class);
-        $connection->method('getDriverName')->willReturn('pgsql');
+        $connection->method('getDriverName')->willReturn('sqlsrv');
 
         $this->expectException(ReplayVerificationFailed::class);
-        $this->expectExceptionMessage('same-engine replay is not implemented for [pgsql]');
+        $this->expectExceptionMessage('same-engine replay is not implemented for [sqlsrv]');
 
         (new ReplayVerifierResolver($this->databases(), new Filesystem()))->resolve($connection);
+    }
+
+    public function test_resolver_selects_postgres_same_engine_replay(): void
+    {
+        $connection = $this->createStub(Connection::class);
+        $connection->method('getDriverName')->willReturn('pgsql');
+
+        self::assertInstanceOf(
+            PostgresReplayVerifier::class,
+            (new ReplayVerifierResolver($this->databases(), new Filesystem()))->resolve($connection),
+        );
     }
 
     /**

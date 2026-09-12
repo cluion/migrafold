@@ -63,6 +63,66 @@ final class ColumnBlueprintRendererTest extends TestCase
         yield 'set' => ["set('read','write')", "\$table->set('value', ['read', 'write']);"];
     }
 
+    #[DataProvider('supportedPostgresTypes')]
+    public function test_it_maps_supported_postgres_types_to_lossless_blueprint_calls(
+        string $type,
+        string $expected,
+    ): void {
+        self::assertSame(
+            $expected,
+            (new ColumnBlueprintRenderer())->render($this->column($type), 'pgsql'),
+        );
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function supportedPostgresTypes(): iterable
+    {
+        yield 'boolean' => ['boolean', "\$table->boolean('value');"];
+        yield 'binary' => ['bytea', "\$table->binary('value');"];
+        yield 'double precision' => ['double precision', "\$table->double('value');"];
+        yield 'JSONB' => ['jsonb', "\$table->jsonb('value');"];
+        yield 'real' => ['real', "\$table->addColumn('real', 'value');"];
+        yield 'timestamp with time zone' => ['timestamptz', "\$table->timestampTz('value');"];
+        yield 'precise timestamp with time zone' => ['timestamptz(3)', "\$table->timestampTz('value', 3);"];
+        yield 'time with time zone' => ['timetz', "\$table->timeTz('value');"];
+        yield 'precise time with time zone' => ['timetz(4)', "\$table->timeTz('value', 4);"];
+    }
+
+    #[DataProvider('postgresSerialTypes')]
+    public function test_it_maps_postgres_serial_types_to_signed_increment_calls(
+        string $type,
+        string $expected,
+    ): void {
+        self::assertSame(
+            $expected,
+            (new ColumnBlueprintRenderer())->render($this->column($type, true), 'pgsql'),
+        );
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function postgresSerialTypes(): iterable
+    {
+        yield 'small serial' => ['smallint', "\$table->smallIncrements('value');"];
+        yield 'serial' => ['integer', "\$table->increments('value');"];
+        yield 'big serial' => ['bigint', "\$table->bigIncrements('value');"];
+    }
+
+    #[DataProvider('unsupportedPostgresTypes')]
+    public function test_it_refuses_postgres_types_without_a_lossless_blueprint_mapping(string $type): void
+    {
+        $this->expectException(UnsupportedMigrationGeneration::class);
+        $this->expectExceptionMessage("column [value] has unsupported unconstrained PostgreSQL type [{$type}]");
+
+        (new ColumnBlueprintRenderer())->render($this->column($type), 'pgsql');
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function unsupportedPostgresTypes(): iterable
+    {
+        yield 'unconstrained varchar' => ['varchar'];
+        yield 'unconstrained numeric' => ['numeric'];
+    }
+
     #[DataProvider('unsupportedTypes')]
     public function test_it_refuses_physical_types_without_a_lossless_mapping(string $type): void
     {
@@ -84,7 +144,7 @@ final class ColumnBlueprintRendererTest extends TestCase
         yield 'geometry' => ['geometry'];
     }
 
-    private function column(string $type): ColumnDefinition
+    private function column(string $type, bool $autoIncrement = false): ColumnDefinition
     {
         return new ColumnDefinition(
             name: 'value',
@@ -92,7 +152,7 @@ final class ColumnBlueprintRendererTest extends TestCase
             typeName: strtok($type, '( ') ?: $type,
             nullable: false,
             default: null,
-            autoIncrement: false,
+            autoIncrement: $autoIncrement,
             collation: null,
             comment: null,
             generation: null,

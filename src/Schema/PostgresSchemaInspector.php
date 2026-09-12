@@ -502,7 +502,21 @@ SQL);
             return $default;
         }
 
+        if (preg_match("/^'([^']+)'::(smallint|integer|bigint|numeric|decimal|real|double precision)$/i", $default, $matches) === 1
+            && is_numeric($matches[1])
+            && $this->numericCastMatchesType($type, strtolower($matches[2]))) {
+            return $matches[1];
+        }
+
         throw $this->unsupported('column_default_expression', $identity);
+    }
+
+    private function numericCastMatchesType(string $type, string $cast): bool
+    {
+        $normalizedType = preg_match('/^(?:numeric|decimal)\b/', $type) === 1 ? 'numeric' : $type;
+        $normalizedCast = $cast === 'decimal' ? 'numeric' : $cast;
+
+        return $normalizedType === $normalizedCast;
     }
 
     private function unsupported(string $feature, string $identity): UnsupportedSchemaFeature

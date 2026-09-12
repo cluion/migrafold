@@ -15,7 +15,7 @@ final readonly class TableMigrationRenderer
         private ColumnBlueprintRenderer $columns = new ColumnBlueprintRenderer(),
     ) {}
 
-    public function render(TableDefinition $table): string
+    public function render(TableDefinition $table, ?string $driver = null): string
     {
         $this->assertStructureIsSafe($table);
         $this->assertAutoIncrementIsSafe($table);
@@ -35,7 +35,7 @@ final readonly class TableMigrationRenderer
         }
 
         foreach ($table->columns as $column) {
-            $statements[] = $this->columns->render($column);
+            $statements[] = $this->columns->render($column, $driver);
         }
 
         foreach ($table->indexes as $index) {

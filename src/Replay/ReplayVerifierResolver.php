@@ -25,6 +25,11 @@ final readonly class ReplayVerifierResolver
                 $this->files,
                 $connection,
             ),
+            'pgsql' => new PostgresReplayVerifier(
+                $this->databases,
+                $this->files,
+                $connection,
+            ),
             default => throw ReplayVerificationFailed::because(
                 "same-engine replay is not implemented for [{$connection->getDriverName()}].",
             ),

@@ -40,7 +40,7 @@ MIGRAFOLD_DB_USERNAME=migrafold \
 MIGRAFOLD_DB_PASSWORD=migrafold \
 "$project_root/vendor/bin/phpunit" \
     --configuration "$project_root/phpunit.database.xml.dist" \
-    --filter PostgresSchemaInspectorTest
+    --filter 'Postgres(SchemaInspector|ReplayVerifier)Test'
 
 MIGRAFOLD_DATABASE_TESTS=1 \
 MIGRAFOLD_DB_DRIVER=pgsql \
@@ -51,6 +51,6 @@ MIGRAFOLD_DB_USERNAME=migrafold \
 MIGRAFOLD_DB_PASSWORD=migrafold \
 "$project_root/vendor/bin/phpunit" \
     --configuration "$project_root/phpunit.database.xml.dist" \
-    --filter PostgresSchemaInspectorTest
+    --filter 'Postgres(SchemaInspector|ReplayVerifier)Test'
 
 "$project_root/tests/DatabaseConsumer/run"

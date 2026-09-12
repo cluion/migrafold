@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Schema;
 
+use Cluion\Migrafold\Migration\BaselineMigrationGenerator;
+use Cluion\Migrafold\Migration\GeneratedMigration;
 use Cluion\Migrafold\Schema\Exception\UnsupportedSchemaFeature;
 use Cluion\Migrafold\Schema\PostgresSchemaInspector;
 use Illuminate\Database\PostgresConnection;
+use Illuminate\Database\Migrations\Migration;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Facade;
 use PDO;
@@ -138,6 +141,57 @@ final class PostgresSchemaInspectorTest extends TestCase
         );
 
         self::assertSame(['users'], array_column($snapshot->toArray()['tables'], 'name'));
+    }
+
+    public function test_generated_baselines_replay_the_same_schema_on_a_real_server(): void
+    {
+        $this->createSupportedSchema();
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString("\$table->bigIncrements('id');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->boolean('enabled')->default(true);", $generated[1]->contents);
+        self::assertStringContainsString("\$table->jsonb('metadata')->nullable();", $generated[1]->contents);
+        self::assertStringContainsString("->storedAs('lower((email)::text)')", $generated[1]->contents);
+
+        $this->resetDatabase();
+
+        foreach ($generated as $migration) {
+            $this->runMigration($migration);
+        }
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_postgres_specific_physical_types_round_trip_on_a_real_server(): void
+    {
+        $this->connection->statement(<<<'SQL'
+create table measurements (
+    id bigserial primary key,
+    ratio real not null default 1.25,
+    score double precision not null default 2.5,
+    payload bytea not null,
+    happened_at timestamp(3) with time zone null,
+    local_time time(4) with time zone null
+)
+SQL);
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString("\$table->addColumn('real', 'ratio')->default(1.25);", $generated[0]->contents);
+        self::assertStringContainsString("\$table->double('score')->default(2.5);", $generated[0]->contents);
+        self::assertStringContainsString("\$table->binary('payload');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->timestampTz('happened_at', 3)->nullable();", $generated[0]->contents);
+        self::assertStringContainsString("\$table->timeTz('local_time', 4)->nullable();", $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
     }
 
     public function test_it_refuses_non_public_search_paths(): void
@@ -315,6 +369,27 @@ drop schema if exists tenant cascade;
 drop schema if exists public cascade;
 create schema public
 SQL);
+    }
+
+    private function runMigration(GeneratedMigration $generated): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'migrafold-generated-');
+
+        if ($path === false || file_put_contents($path, $generated->contents) === false) {
+            throw new RuntimeException('Unable to create a generated migration fixture.');
+        }
+
+        try {
+            $migration = require $path;
+        } finally {
+            unlink($path);
+        }
+
+        if (! $migration instanceof Migration || ! is_callable([$migration, 'up'])) {
+            throw new RuntimeException('Generated migration fixture did not return a migration.');
+        }
+
+        $migration->up();
     }
 
     private function environment(string $name): string

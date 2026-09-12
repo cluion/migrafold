@@ -52,7 +52,7 @@ final readonly class BaselineMigrationGenerator
             $migrations[] = new GeneratedMigration(
                 filename: $filename,
                 table: $table->name,
-                contents: $this->renderer->render($table),
+                contents: $this->renderer->render($table, $snapshot->driver),
             );
         }
 

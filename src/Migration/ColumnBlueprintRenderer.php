@@ -9,9 +9,9 @@ use Cluion\Migrafold\Schema\Definition\ColumnDefinition;
 
 final class ColumnBlueprintRenderer
 {
-    public function render(ColumnDefinition $column): string
+    public function render(ColumnDefinition $column, ?string $driver = null): string
     {
-        $line = '$table->'.$this->typeCall($column);
+        $line = '$table->'.$this->typeCall($column, $driver);
 
         if ($column->nullable) {
             $line .= '->nullable()';
@@ -55,7 +55,7 @@ final class ColumnBlueprintRenderer
         return $line.';';
     }
 
-    private function typeCall(ColumnDefinition $column): string
+    private function typeCall(ColumnDefinition $column, ?string $driver): string
     {
         $type = strtolower(trim($column->type));
         $name = $this->export($column->name);
@@ -92,6 +92,20 @@ final class ColumnBlueprintRenderer
             };
 
             if ($column->autoIncrement) {
+                if ($driver === 'pgsql') {
+                    if ($unsigned) {
+                        throw UnsupportedMigrationGeneration::forSchema(
+                            "PostgreSQL auto-increment column [{$column->name}] must be signed.",
+                        );
+                    }
+
+                    return match ($method) {
+                        'smallInteger' => "smallIncrements({$name})",
+                        'bigInteger' => "bigIncrements({$name})",
+                        default => "increments({$name})",
+                    };
+                }
+
                 if (! $unsigned && $type !== 'integer') {
                     throw UnsupportedMigrationGeneration::forSchema(
                         "auto-increment column [{$column->name}] is not unsigned.",
@@ -110,12 +124,41 @@ final class ColumnBlueprintRenderer
             return ($unsigned ? 'unsigned'.ucfirst($method) : $method)."({$name})";
         }
 
+        if ($driver === 'pgsql' && in_array($type, ['varchar', 'numeric'], true)) {
+            throw UnsupportedMigrationGeneration::forSchema(
+                "column [{$column->name}] has unsupported unconstrained PostgreSQL type [{$column->type}].",
+            );
+        }
+
         if (preg_match('/^varchar(?:\((\d+)\))?$/', $type, $matches) === 1) {
             return isset($matches[1]) ? "string({$name}, {$matches[1]})" : "string({$name})";
         }
 
         if (preg_match('/^char\((\d+)\)$/', $type, $matches) === 1) {
             return "char({$name}, {$matches[1]})";
+        }
+
+        if ($driver === 'pgsql') {
+            $postgres = [
+                'boolean' => 'boolean',
+                'bytea' => 'binary',
+                'double precision' => 'double',
+                'jsonb' => 'jsonb',
+            ];
+
+            if (isset($postgres[$type])) {
+                return $postgres[$type]."({$name})";
+            }
+
+            if ($type === 'real') {
+                return "addColumn('real', {$name})";
+            }
+
+            if (preg_match('/^(timestamptz|timetz)(?:\((\d+)\))?$/', $type, $matches) === 1) {
+                $method = $matches[1] === 'timestamptz' ? 'timestampTz' : 'timeTz';
+
+                return isset($matches[2]) ? "{$method}({$name}, {$matches[2]})" : "{$method}({$name})";
+            }
         }
 
         $simple = [
