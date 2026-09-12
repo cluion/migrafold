@@ -65,11 +65,11 @@ final class ColumnBlueprintRenderer
             $width = ($matches[2] ?? '') === '' ? null : $matches[2];
             $unsigned = ($matches[3] ?? '') !== '';
             $defaultWidths = [
-                'tinyint' => '4',
-                'smallint' => '6',
-                'mediumint' => '9',
-                'int' => '11',
-                'integer' => '11',
+                'tinyint' => $unsigned ? '3' : '4',
+                'smallint' => $unsigned ? '5' : '6',
+                'mediumint' => $unsigned ? '8' : '9',
+                'int' => $unsigned ? '10' : '11',
+                'integer' => $unsigned ? '10' : '11',
                 'bigint' => '20',
             ];
 

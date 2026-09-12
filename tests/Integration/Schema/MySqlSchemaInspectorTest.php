@@ -165,6 +165,35 @@ final class MySqlSchemaInspectorTest extends TestCase
         self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
     }
 
+    public function test_unsigned_integer_columns_round_trip_without_losing_mariadb_display_widths(): void
+    {
+        $this->connection->statement(<<<'SQL'
+create table unsigned_integer_widths (
+    id bigint unsigned not null auto_increment primary key,
+    tiny_value tinyint unsigned not null,
+    small_value smallint unsigned not null,
+    medium_value mediumint unsigned not null,
+    integer_value int unsigned not null,
+    big_value bigint unsigned not null
+)
+SQL);
+
+        $inspector = new MySqlSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString("\$table->unsignedTinyInteger('tiny_value');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->unsignedSmallInteger('small_value');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->unsignedMediumInteger('medium_value');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->unsignedInteger('integer_value');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->unsignedBigInteger('big_value');", $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
     public function test_common_numeric_and_binary_columns_round_trip_on_a_real_server(): void
     {
         $this->connection->statement(<<<'SQL'

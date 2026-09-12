@@ -24,11 +24,16 @@ final class ColumnBlueprintRendererTest extends TestCase
         yield 'boolean' => ['tinyint(1)', "\$table->boolean('value');"];
         yield 'tiny integer' => ['tinyint', "\$table->tinyInteger('value');"];
         yield 'unsigned tiny integer' => ['tinyint unsigned', "\$table->unsignedTinyInteger('value');"];
+        yield 'MariaDB unsigned tiny integer' => ['tinyint(3) unsigned', "\$table->unsignedTinyInteger('value');"];
         yield 'small integer' => ['smallint', "\$table->smallInteger('value');"];
+        yield 'MariaDB unsigned small integer' => ['smallint(5) unsigned', "\$table->unsignedSmallInteger('value');"];
         yield 'medium integer' => ['mediumint', "\$table->mediumInteger('value');"];
+        yield 'MariaDB unsigned medium integer' => ['mediumint(8) unsigned', "\$table->unsignedMediumInteger('value');"];
         yield 'integer' => ['int', "\$table->integer('value');"];
+        yield 'MariaDB unsigned integer' => ['int(10) unsigned', "\$table->unsignedInteger('value');"];
         yield 'big integer' => ['bigint', "\$table->bigInteger('value');"];
         yield 'unsigned big integer' => ['bigint unsigned', "\$table->unsignedBigInteger('value');"];
+        yield 'MariaDB unsigned big integer' => ['bigint(20) unsigned', "\$table->unsignedBigInteger('value');"];
         yield 'variable string' => ['varchar', "\$table->string('value');"];
         yield 'limited variable string' => ['varchar(80)', "\$table->string('value', 80);"];
         yield 'fixed string' => ['char(36)', "\$table->char('value', 36);"];
