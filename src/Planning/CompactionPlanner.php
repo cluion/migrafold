@@ -34,9 +34,13 @@ final readonly class CompactionPlanner
         string $date,
         SourceDispositionMode $disposition,
         ?string $archiveId,
+        string $migrationTable = 'migrations',
     ): CompactionPlan {
         $catalog = $this->discoverer->discover($adapters);
-        $snapshot = $this->inspectors->resolve($connection)->inspect($connection);
+        $snapshot = $this->inspectors->resolve($connection)->inspect(
+            $connection,
+            array_values(array_unique(['migrations', $migrationTable])),
+        );
         $generated = $this->generator->generate($snapshot, $date);
         $output = $this->outputPlanner->plan($snapshot, $generated, $catalog);
 
@@ -52,6 +56,13 @@ final readonly class CompactionPlanner
         );
         $activation = $this->activationPlanner->plan($catalog, $output, $sourceDisposition);
 
-        return new CompactionPlan($snapshot, $catalog, $output, $sourceDisposition, $activation);
+        return new CompactionPlan(
+            $snapshot,
+            $catalog,
+            $output,
+            $sourceDisposition,
+            $activation,
+            $migrationTable,
+        );
     }
 }

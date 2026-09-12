@@ -27,8 +27,9 @@ final readonly class CompactionExecutor
     public function execute(
         CompactionPlan $plan,
         Connection $connection,
-        string $migrationTable = 'migrations',
+        ?string $migrationTable = null,
     ): CompactionExecutionResult {
+        $migrationTable ??= $plan->migrationTable;
         $this->outputs->execute($plan->output);
         $this->outputs->execute($plan->output, OutputMode::Write);
         $checkpoint = null;

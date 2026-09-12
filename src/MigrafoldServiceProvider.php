@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cluion\Migrafold;
 
+use Cluion\Migrafold\Console\CompactCommand;
 use Cluion\Migrafold\Console\PlanCommand;
 use Illuminate\Support\ServiceProvider;
 
@@ -17,7 +18,10 @@ final class MigrafoldServiceProvider extends ServiceProvider
     public function boot(): void
     {
         if ($this->app->runningInConsole()) {
-            $this->commands([PlanCommand::class]);
+            $this->commands([
+                CompactCommand::class,
+                PlanCommand::class,
+            ]);
         }
     }
 }

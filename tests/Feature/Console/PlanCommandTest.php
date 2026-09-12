@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Console;
 
+use Cluion\Migrafold\Activation\MigrationTableNameResolver;
 use Cluion\Migrafold\Console\PlanCommand;
 use Cluion\Migrafold\Planning\CompactionPlanner;
 use Cluion\Migrafold\Planning\MigrationSourceAdapterFactory;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
@@ -102,6 +104,7 @@ final class PlanCommandTest extends TestCase
             $laravel,
             $this->databases(),
             $laravel,
+            new MigrationTableNameResolver($this->config()),
             new MigrationSourceAdapterFactory(),
             new CompactionPlanner(),
         );
@@ -121,6 +124,17 @@ final class PlanCommandTest extends TestCase
         }
 
         return $manager;
+    }
+
+    private function config(): ConfigRepository
+    {
+        $config = $this->testApplication()->make('config');
+
+        if (! $config instanceof ConfigRepository) {
+            throw new RuntimeException('Laravel configuration repository is unavailable.');
+        }
+
+        return $config;
     }
 
     private function testApplication(): Application

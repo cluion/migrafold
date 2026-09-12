@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cluion\Migrafold\Console;
 
+use Cluion\Migrafold\Activation\MigrationTableNameResolver;
 use Cluion\Migrafold\Disposition\SourceDispositionMode;
 use Cluion\Migrafold\Planning\CompactionPlan;
 use Cluion\Migrafold\Planning\CompactionPlanner;
@@ -33,6 +34,7 @@ final class PlanCommand extends Command
         private readonly Application $application,
         private readonly DatabaseManager $databases,
         private readonly Container $container,
+        private readonly MigrationTableNameResolver $migrationTables,
         private readonly MigrationSourceAdapterFactory $adapters,
         private readonly CompactionPlanner $planner,
     ) {
@@ -49,6 +51,7 @@ final class PlanCommand extends Command
             $archiveId = $this->archiveId($disposition);
             $connection = $this->connection();
             $root = $this->application->basePath();
+            $migrationTable = $this->migrationTables->resolve();
             $plan = $this->planner->plan(
                 $root,
                 $connection,
@@ -56,6 +59,7 @@ final class PlanCommand extends Command
                 $date,
                 $disposition,
                 $archiveId,
+                $migrationTable,
             );
 
             $this->render($plan);
@@ -123,10 +127,12 @@ final class PlanCommand extends Command
 
         $schema = $summary['schema'];
         $this->components->info('Migrafold plan is valid. No files or database records were changed.');
+        $this->line("Plan fingerprint: {$summary['plan_fingerprint']}");
         $this->line("Database: {$schema['driver']}");
         $this->line("Schema fingerprint: {$schema['fingerprint']}");
         $this->line("Tables: {$schema['tables']}");
         $this->line("Source disposition: {$summary['source_disposition']}");
+        $this->line("Migration table: {$summary['records']['table']}");
         $this->line('Retired records: '.count($summary['records']['retire']));
         $this->line('Baseline records: '.count($summary['records']['activate']));
 
