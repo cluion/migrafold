@@ -147,6 +147,28 @@ final class ColumnBlueprintRenderer
             return ($matches[3] ?? '') === '' ? $call : $call.'->unsigned()';
         }
 
+        if ($type === 'numeric') {
+            return "decimal({$name})";
+        }
+
+        if (preg_match('/^(float|double)( unsigned)?$/', $type, $matches) === 1) {
+            $call = $matches[1] === 'float'
+                ? "float({$name}, 24)"
+                : "double({$name})";
+
+            return ($matches[2] ?? '') === '' ? $call : $call.'->unsigned()';
+        }
+
+        if ($type === 'blob') {
+            return "binary({$name})";
+        }
+
+        if (preg_match('/^(var)?binary\((\d+)\)$/', $type, $matches) === 1) {
+            $fixed = $matches[1] === '' ? ', true' : '';
+
+            return "binary({$name}, {$matches[2]}{$fixed})";
+        }
+
         if (preg_match('/^(enum|set)\((.*)\)$/', $type, $matches) === 1) {
             $values = $this->parseQuotedList($matches[2], $column->name);
 

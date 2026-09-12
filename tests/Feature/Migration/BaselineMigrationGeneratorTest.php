@@ -175,6 +175,32 @@ final class BaselineMigrationGeneratorTest extends TestCase
         (new TableMigrationRenderer())->render($table);
     }
 
+    public function test_common_numeric_and_binary_columns_replay_the_same_sqlite_schema(): void
+    {
+        Schema::create('measurements', static function (Blueprint $table): void {
+            $table->id();
+            $table->float('ratio', 24)->default(1.25);
+            $table->double('score')->default(2.5);
+            $table->decimal('amount', 10, 2)->default(0);
+            $table->binary('payload');
+        });
+
+        $inspector = new SqliteSchemaInspector();
+        $source = $inspector->inspect($this->connection());
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString("\$table->float('ratio', 24)->default('1.25');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->double('score')->default('2.5');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->decimal('amount')->default('0');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->binary('payload');", $generated[0]->contents);
+
+        $this->resetToEmptyDatabase();
+        $directory = $this->migrationDirectory($this->migrationMap($generated));
+        $this->migrator()->run($directory);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection())->toJson());
+    }
+
     private function createSourceSchema(): void
     {
         Schema::create('roles', function (Blueprint $table): void {

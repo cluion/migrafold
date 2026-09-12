@@ -91,6 +91,19 @@ return [
 
 Publish the configuration with `php artisan vendor:publish --tag=migrafold-config`. An inactive or unknown owner, unsafe Module path, vendor-owned Module, unsafe generator path, or Module migration history without explicit ownership stops planning before any mutation.
 
+## Schema generation support
+
+Migrafold renders the inspected physical schema rather than trying to recover the original Laravel helper calls. The verified column mapping covers:
+
+- Signed and unsigned integer families, booleans, and safe auto-increment primary keys.
+- `char`, `varchar`, text families, and JSON.
+- Date, datetime, timestamp, time, and year columns with available precision.
+- Decimal, SQLite numeric, float, and double columns, including MySQL/MariaDB unsigned modifiers.
+- Enum, set, blob, fixed binary, and variable binary columns.
+- Nullable values, raw defaults, collations, comments, and virtual or stored generated expressions where the database exposes them.
+
+Types or modifiers without a lossless Blueprint representation stop generation with `MGF-GENERATE-001`. Examples include bit fields, precision-bearing SQLite numeric declarations, ambiguous `real` columns, nonstandard blob sizes, and spatial columns. Existing inspector-level safety checks still reject schema features such as triggers, check constraints, expression indexes, and partial or prefix indexes before rendering.
+
 ## Development
 
 ```bash

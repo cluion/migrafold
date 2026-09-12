@@ -162,6 +162,35 @@ final class MySqlSchemaInspectorTest extends TestCase
         self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
     }
 
+    public function test_common_numeric_and_binary_columns_round_trip_on_a_real_server(): void
+    {
+        $this->connection->statement(<<<'SQL'
+create table measurements (
+    id bigint unsigned not null auto_increment primary key,
+    ratio float unsigned not null default 1.25,
+    score double not null default 2.5,
+    payload blob not null,
+    fixed_token binary(16) not null,
+    variable_token varbinary(32) not null
+)
+SQL);
+
+        $inspector = new MySqlSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString("\$table->float('ratio', 24)->unsigned()->default(1.25);", $generated[0]->contents);
+        self::assertStringContainsString("\$table->double('score')->default(2.5);", $generated[0]->contents);
+        self::assertStringContainsString("\$table->binary('payload');", $generated[0]->contents);
+        self::assertStringContainsString("\$table->binary('fixed_token', 16, true);", $generated[0]->contents);
+        self::assertStringContainsString("\$table->binary('variable_token', 32);", $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
     public function test_migration_record_transaction_commits_and_releases_its_lock(): void
     {
         $this->createMigrationRepository();
