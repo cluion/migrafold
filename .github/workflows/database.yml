@@ -1,0 +1,87 @@
+name: Database Integration
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/database.yml'
+      - 'composer.json'
+      - 'config/**'
+      - 'phpunit.database.xml.dist'
+      - 'src/**'
+      - 'tests/Fixtures/Schema/**'
+      - 'tests/Integration/**'
+      - 'tests/docker-compose.yml'
+      - 'tests/run-database-tests'
+  pull_request:
+    paths:
+      - '.github/workflows/database.yml'
+      - 'composer.json'
+      - 'config/**'
+      - 'phpunit.database.xml.dist'
+      - 'src/**'
+      - 'tests/Fixtures/Schema/**'
+      - 'tests/Integration/**'
+      - 'tests/docker-compose.yml'
+      - 'tests/run-database-tests'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  database:
+    name: MySQL and MariaDB / Laravel ${{ matrix.laravel }} / PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - laravel: '12'
+            testbench: '10'
+            php: '8.2'
+          - laravel: '13'
+            testbench: '11'
+            php: '8.3'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_mysql
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate Composer metadata
+        run: composer validate --strict
+
+      - name: Install matching-major dependencies
+        run: >-
+          composer update
+          --with "illuminate/console:^${{ matrix.laravel }}.0"
+          --with "illuminate/database:^${{ matrix.laravel }}.0"
+          --with "illuminate/filesystem:^${{ matrix.laravel }}.0"
+          --with "illuminate/support:^${{ matrix.laravel }}.0"
+          --with "orchestra/testbench:^${{ matrix.testbench }}.0"
+          --no-interaction
+          --no-progress
+          --prefer-dist
+
+      - name: Audit dependencies
+        run: composer audit --locked --no-interaction
+
+      - name: Run database integration tests
+        run: composer test:databases
