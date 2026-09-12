@@ -7,9 +7,11 @@ namespace Tests\Feature\Planning;
 use Cluion\Migrafold\Discovery\Exception\MigrationDiscoveryFailed;
 use Cluion\Migrafold\Discovery\LaravelMigrationSourceAdapter;
 use Cluion\Migrafold\Discovery\MigrationDiscoverer;
+use Cluion\Migrafold\Discovery\NwidartMigrationSourceAdapter;
 use Cluion\Migrafold\Disposition\SourceDispositionMode;
 use Cluion\Migrafold\Planning\CompactionPlanner;
 use Cluion\Migrafold\Planning\MigrationSourceAdapterFactory;
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Container\Container;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -123,6 +125,105 @@ final class CompactionPlannerTest extends TestCase
         $this->expectExceptionMessage('partially bound');
 
         (new MigrationSourceAdapterFactory())->forApplication($root, $container);
+    }
+
+    public function test_adapter_factory_adds_nwidart_runtime_with_configured_ownership(): void
+    {
+        $root = $this->root();
+        $moduleRoot = $root.'/Modules/Billing';
+        $this->write(
+            $moduleRoot.'/database/migrations/2020_01_01_000000_create_invoices_table.php',
+            "<?php\n",
+        );
+        $module = new class($moduleRoot)
+        {
+            public function __construct(private readonly string $path) {}
+
+            public function getName(): string
+            {
+                return 'Billing';
+            }
+
+            public function getPath(): string
+            {
+                return $this->path;
+            }
+        };
+        $repository = new class($module)
+        {
+            public function __construct(private readonly object $module) {}
+
+            /** @return array<string, object> */
+            public function allEnabled(): array
+            {
+                return ['billing' => $this->module];
+            }
+
+            public function config(string $key, mixed $default = null): mixed
+            {
+                return $key === 'paths.generator.migration.path'
+                    ? 'database/migrations'
+                    : $default;
+            }
+        };
+        $container = new Container();
+        $container->instance('Nwidart\\Modules\\Contracts\\RepositoryInterface', $repository);
+        $container->instance('config', new ConfigRepository([
+            'migrafold' => [
+                'nwidart' => [
+                    'table_owners' => ['invoices' => 'Billing'],
+                ],
+            ],
+        ]));
+
+        $adapters = (new MigrationSourceAdapterFactory())->forApplication($root, $container);
+        $catalog = (new MigrationDiscoverer())->discover($adapters);
+
+        self::assertCount(2, $adapters);
+        self::assertSame(['laravel:application', 'nwidart:Billing'], array_map(
+            static fn ($owner): string => $owner->id,
+            $catalog->owners,
+        ));
+        self::assertSame('nwidart:Billing', $catalog->ownerForTable('invoices')->id);
+    }
+
+    public function test_nwidart_owned_tables_plan_outputs_and_source_retirement_in_the_module(): void
+    {
+        Schema::create('invoices', static function (Blueprint $table): void {
+            $table->id();
+            $table->string('number')->unique();
+        });
+        $root = $this->root();
+        $moduleRoot = $root.'/Modules/Billing';
+        $source = $this->write(
+            $moduleRoot.'/database/migrations/2020_01_01_000000_create_invoices_table.php',
+            "<?php\n",
+        );
+        $plan = (new CompactionPlanner())->plan(
+            $root,
+            $this->connection(),
+            [
+                new LaravelMigrationSourceAdapter($root),
+                NwidartMigrationSourceAdapter::fromPayloads(
+                    $root,
+                    [['name' => 'Billing', 'path' => $moduleRoot]],
+                    ['invoices' => 'Billing'],
+                ),
+            ],
+            '2026_09_12',
+            SourceDispositionMode::Archive,
+            '2026-09-12T120000Z',
+        );
+
+        self::assertSame('nwidart:Billing', $plan->output->owners[0]->ownerId);
+        self::assertSame(dirname($source), $plan->output->owners[0]->output->directory);
+        self::assertSame('nwidart:Billing', $plan->disposition->items[0]->ownerId);
+        self::assertSame($source, $plan->disposition->items[0]->source);
+        self::assertNotNull($plan->disposition->items[0]->destination);
+        self::assertStringStartsWith(dirname($source).'/.migrafold-archive/', $plan->disposition->items[0]->destination);
+        self::assertFileDoesNotExist(
+            dirname($source).'/2026_09_12_000001_create_invoices_baseline.php',
+        );
     }
 
     /** @param array<mixed> $payload */

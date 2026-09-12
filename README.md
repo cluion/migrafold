@@ -13,7 +13,7 @@ The planned first release targets:
 - PHP 8.2 or newer.
 - Laravel 12 and 13.
 - SQLite, MySQL, and MariaDB with same-engine verification.
-- Plain Laravel and first-party Moduark discovery.
+- Plain Laravel, Moduark, and nWidart Module discovery.
 - Archive by default; explicit confirmation for deletion.
 - Manifest-scoped migration-record activation instead of truncating the repository.
 
@@ -27,7 +27,7 @@ The current implementation includes:
 - Canonical, deterministic JSON snapshots with SHA-256 fingerprints and an explicit capability report.
 - A deterministic per-table PHP migration generator with dependency ordering, existing-table guards, and irreversible rollback protection.
 - A dry-run-first output writer with collision refusal, verified file publication, and a deterministic source/output manifest.
-- Deterministic migration discovery for Laravel applications and active Moduark Modules, including explicit table ownership and source fingerprints.
+- Deterministic migration discovery for Laravel applications, active Moduark Modules, and active nWidart Modules, including explicit table ownership and source fingerprints.
 - Owner-aware output planning with per-owner manifests, global dry-run preflight, and rollback across application and Module directories.
 - Manifest-protected source archival or explicit deletion with fingerprint revalidation and cross-owner rollback.
 - Transactional, lock-protected migration-record activation that replaces only the exact retired scope and preserves unrelated history.
@@ -74,6 +74,22 @@ php artisan migrafold:compact \
 Archive mode remains the default. The execution command has no general force bypass.
 
 When all three Moduark runtime services are available, active Module migration directories and table ownership are included automatically. A partial Moduark runtime fails closed instead of silently producing an incomplete plan.
+
+When `nwidart/laravel-modules` is active, Migrafold uses its repository's enabled Module list and configured migration generator path. Because nWidart does not expose authoritative table ownership, configure every Module table explicitly:
+
+```php
+// config/migrafold.php
+return [
+    'nwidart' => [
+        'table_owners' => [
+            'invoices' => 'Billing',
+            'invoice_items' => 'Billing',
+        ],
+    ],
+];
+```
+
+Publish the configuration with `php artisan vendor:publish --tag=migrafold-config`. An inactive or unknown owner, unsafe Module path, vendor-owned Module, unsafe generator path, or Module migration history without explicit ownership stops planning before any mutation.
 
 ## Development
 

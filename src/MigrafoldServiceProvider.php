@@ -12,12 +12,16 @@ final class MigrafoldServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        // Concrete planning services are resolved through Laravel's container.
+        $this->mergeConfigFrom(__DIR__.'/../config/migrafold.php', 'migrafold');
     }
 
     public function boot(): void
     {
         if ($this->app->runningInConsole()) {
+            $this->publishes([
+                __DIR__.'/../config/migrafold.php' => $this->app->configPath('migrafold.php'),
+            ], 'migrafold-config');
+
             $this->commands([
                 CompactCommand::class,
                 PlanCommand::class,
