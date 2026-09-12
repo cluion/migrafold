@@ -10,7 +10,6 @@ use Cluion\Migrafold\Discovery\LaravelMigrationSourceAdapter;
 use Cluion\Migrafold\Disposition\SourceDispositionMode;
 use Cluion\Migrafold\Execution\CompactionExecutor;
 use Cluion\Migrafold\Planning\CompactionPlan;
-use Cluion\Migrafold\Planning\CompactionPlanner;
 use Cluion\Migrafold\Planning\MigrationSourceAdapterFactory;
 use Cluion\Migrafold\Schema\Definition\TableDefinition;
 use Illuminate\Contracts\Console\Kernel;
@@ -24,6 +23,7 @@ use RuntimeException;
 use Symfony\Component\Console\Application as ConsoleApplication;
 use Symfony\Component\Console\Tester\CommandTester;
 use Tests\TestCase;
+use Tests\Support\MigrationSource;
 
 final class CompactCommandTest extends TestCase
 {
@@ -50,7 +50,10 @@ final class CompactCommandTest extends TestCase
     {
         $fixture = $this->fixture(SourceDispositionMode::Archive);
         $stale = $fixture['plan']->fingerprint();
-        self::assertNotFalse(file_put_contents($fixture['source'], "<?php\n// changed source migration\n"));
+        self::assertNotFalse(file_put_contents(
+            $fixture['source'],
+            MigrationSource::users()."\n// changed source migration\n",
+        ));
 
         $tester = $this->tester($fixture['root']);
         $status = $tester->execute([
@@ -153,9 +156,9 @@ final class CompactCommandTest extends TestCase
         $oldName = '2020_01_01_000000_create_users_table';
         $source = $this->write(
             $root.'/database/migrations/'.$oldName.'.php',
-            "<?php\n// source migration\n",
+            MigrationSource::usersWithIdOnly(),
         );
-        $plan = (new CompactionPlanner())->plan(
+        $plan = $this->compactionPlanner()->plan(
             $root,
             $this->connection(),
             [new LaravelMigrationSourceAdapter($root)],
@@ -211,9 +214,9 @@ final class CompactCommandTest extends TestCase
         $oldName = '2020_01_01_000000_create_users_table';
         $source = $this->write(
             $root.'/database/migrations/'.$oldName.'.php',
-            "<?php\n// source migration\n",
+            MigrationSource::users(),
         );
-        $plan = (new CompactionPlanner())->plan(
+        $plan = $this->compactionPlanner()->plan(
             $root,
             $this->connection(),
             [new LaravelMigrationSourceAdapter($root)],
@@ -248,7 +251,7 @@ final class CompactCommandTest extends TestCase
             $laravel,
             new MigrationTableNameResolver($this->config()),
             new MigrationSourceAdapterFactory(),
-            new CompactionPlanner(),
+            $this->compactionPlanner(),
             new CompactionExecutor(),
         );
         $command->setLaravel($this->testApplication());

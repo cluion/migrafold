@@ -9,20 +9,24 @@ use Cluion\Migrafold\Schema\Definition\SchemaSnapshot;
 
 final readonly class SchemaReplayComparator
 {
-    public function assertEquivalent(SchemaSnapshot $source, SchemaSnapshot $baseline): void
-    {
-        if ($source->driver !== $baseline->driver) {
+    public function assertEquivalent(
+        SchemaSnapshot $expected,
+        SchemaSnapshot $actual,
+        string $expectedLabel = 'source',
+        string $actualLabel = 'baseline',
+    ): void {
+        if ($expected->driver !== $actual->driver) {
             throw ReplayVerificationFailed::because(
-                "source driver [{$source->driver}] does not match baseline driver [{$baseline->driver}].",
+                "{$expectedLabel} driver [{$expected->driver}] does not match {$actualLabel} driver [{$actual->driver}].",
             );
         }
 
-        $sourceFingerprint = $source->fingerprint();
-        $baselineFingerprint = $baseline->fingerprint();
+        $expectedFingerprint = $expected->fingerprint();
+        $actualFingerprint = $actual->fingerprint();
 
-        if (! hash_equals($sourceFingerprint, $baselineFingerprint)) {
+        if (! hash_equals($expectedFingerprint, $actualFingerprint)) {
             throw ReplayVerificationFailed::because(
-                "source schema fingerprint [{$sourceFingerprint}] does not match baseline schema fingerprint [{$baselineFingerprint}].",
+                "{$expectedLabel} schema fingerprint [{$expectedFingerprint}] does not match {$actualLabel} schema fingerprint [{$actualFingerprint}].",
             );
         }
     }

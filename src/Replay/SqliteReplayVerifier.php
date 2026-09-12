@@ -19,7 +19,7 @@ use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Filesystem\Filesystem;
 use Throwable;
 
-final readonly class SqliteReplayVerifier
+final readonly class SqliteReplayVerifier implements MigrationReplayVerifier
 {
     private const WORKSPACE_PREFIX = 'migrafold-replay-';
 
@@ -30,6 +30,7 @@ final readonly class SqliteReplayVerifier
         private SqliteSchemaInspector $inspector = new SqliteSchemaInspector(),
         private SchemaReplayComparator $comparator = new SchemaReplayComparator(),
         private MigrationCatalogAnalyzer $analyzer = new MigrationCatalogAnalyzer(),
+        private BaselineMigrationOrdering $ordering = new BaselineMigrationOrdering(),
         private ?string $temporaryRoot = null,
     ) {}
 
@@ -73,6 +74,8 @@ final readonly class SqliteReplayVerifier
                     'source migrations produced no supported application tables.',
                 );
             }
+
+            $this->ordering->assertBaselinesRunFirst($baselines, $analysis->preserved());
 
             $baselinePaths = $this->writeBaselines($workspace, $baselines);
             $baseline = $this->replay(

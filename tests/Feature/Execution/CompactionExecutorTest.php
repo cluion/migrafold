@@ -16,12 +16,12 @@ use Cluion\Migrafold\Execution\CompactionExecutor;
 use Cluion\Migrafold\Execution\Exception\CompactionExecutionFailed;
 use Cluion\Migrafold\Execution\SourceRecoveryCheckpointManager;
 use Cluion\Migrafold\Planning\CompactionPlan;
-use Cluion\Migrafold\Planning\CompactionPlanner;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
+use Tests\Support\MigrationSource;
 
 final class CompactionExecutorTest extends TestCase
 {
@@ -78,6 +78,51 @@ final class CompactionExecutorTest extends TestCase
         self::assertSame([], glob(dirname($fixture['source']).'/.migrafold-disposition-*') ?: []);
     }
 
+    public function test_execution_leaves_preserved_data_migration_and_record_untouched(): void
+    {
+        Schema::create('users', static function (Blueprint $table): void {
+            $table->id();
+            $table->string('email')->unique();
+        });
+        $root = $this->root();
+        $schemaName = '2020_01_01_000000_create_users_table';
+        $dataName = '2030_01_01_000000_seed_system_user';
+        $schemaSource = $this->write(
+            $root.'/database/migrations/'.$schemaName.'.php',
+            MigrationSource::users(),
+        );
+        $dataSource = $this->write(
+            $root.'/database/migrations/'.$dataName.'.php',
+            MigrationSource::insertUser(),
+        );
+        $plan = $this->compactionPlanner()->plan(
+            $root,
+            $this->connection(),
+            [new LaravelMigrationSourceAdapter($root)],
+            '2026_09_12',
+            SourceDispositionMode::Archive,
+            '2026-09-12T120000Z',
+        );
+        DB::table('migrations')->insert([
+            ['migration' => $schemaName, 'batch' => 1],
+            ['migration' => $dataName, 'batch' => 2],
+            ['migration' => 'unrelated_migration', 'batch' => 3],
+        ]);
+
+        $result = (new CompactionExecutor())->execute($plan, $this->connection());
+
+        self::assertTrue($result->clean());
+        self::assertFileDoesNotExist($schemaSource);
+        self::assertFileExists($dataSource);
+        self::assertSame([
+            ['migration' => $dataName, 'batch' => 2],
+            ['migration' => 'unrelated_migration', 'batch' => 3],
+            ['migration' => $plan->activation->baselineNames()[0], 'batch' => 4],
+        ], DB::table('migrations')->orderBy('id')->get(['migration', 'batch'])->map(
+            static fn (object $row): array => (array) $row,
+        )->all());
+    }
+
     public function test_activation_failure_restores_deleted_sources_and_removes_outputs(): void
     {
         $fixture = $this->fixture(SourceDispositionMode::Delete);
@@ -91,7 +136,7 @@ final class CompactionExecutorTest extends TestCase
             self::assertStringContainsString('database transaction failed', $exception->getMessage());
         }
 
-        self::assertSame("<?php\n// source migration\n", file_get_contents($fixture['source']));
+        self::assertSame(MigrationSource::users(), file_get_contents($fixture['source']));
         self::assertFileDoesNotExist($fixture['baseline']);
         self::assertFileDoesNotExist($fixture['manifest']);
         self::assertSame([
@@ -216,9 +261,9 @@ final class CompactionExecutorTest extends TestCase
         $oldName = '2020_01_01_000000_create_users_table';
         $source = $this->write(
             $root.'/database/migrations/'.$oldName.'.php',
-            "<?php\n// source migration\n",
+            MigrationSource::users(),
         );
-        $plan = (new CompactionPlanner())->plan(
+        $plan = $this->compactionPlanner()->plan(
             $root,
             $this->connection(),
             [new LaravelMigrationSourceAdapter($root)],

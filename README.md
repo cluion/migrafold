@@ -34,6 +34,9 @@ The current implementation includes:
 - An end-to-end `migrafold:plan` command with human-readable and JSON output, automatic Moduark runtime discovery, and no filesystem or migration-record writes.
 - A recoverable execution coordinator that retains private source checkpoints until record activation commits and compensates filesystem changes on failure.
 - An explicitly confirmed `migrafold:compact` command with whole-plan fingerprint binding and a second confirmation for permanent deletion.
+- Catalog-wide AST classification that compacts schema-only migrations, preserves data-only migrations, and blocks mixed, raw, dynamic, unsupported, or invalid migrations.
+- SQLite source/baseline replay in separate temporary databases, including current-database fingerprint verification and baseline-before-preserved ordering checks.
+- Exact compacted scope propagation: preserved migrations remain in place and their migration records are not retired.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
 ## Preview a compaction
@@ -44,9 +47,11 @@ php artisan migrafold:plan \
     --archive-id=2026-09-12T120000Z
 ```
 
-Use `--json` for machine-readable output or `--delete` to preview permanent source deletion. The command only inspects the selected database connection and migration sources; it does not create, move, delete, or activate anything.
+Use `--json` for machine-readable output or `--delete` to preview permanent source deletion. On SQLite, the command replays source and generated migrations in task-specific temporary databases, then removes them. It does not change the selected database, move or delete source files, publish baselines, or activate migration records.
 
-The plan output includes a fingerprint covering the schema, source fingerprints, owner paths, generated outputs, source disposition, migration table, and record replacement scope.
+Planning currently permits execution only on SQLite because its same-engine replay verifier is connected end to end. MySQL and MariaDB inspection and generation remain covered independently, but planning fails closed until their isolated replay resolver is implemented.
+
+The plan output includes a fingerprint covering the schema, source fingerprints, migration classifications and actions, owner paths, generated outputs, source disposition, migration table, and record replacement scope. Data-only migrations are reported under `analysis.preserve`; their row data is replayed for execution safety but is not compared for equality.
 
 ## Execute a compaction
 

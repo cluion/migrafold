@@ -10,9 +10,11 @@ use Cluion\Migrafold\Discovery\MigrationCatalog;
 use Cluion\Migrafold\Discovery\MigrationOwner;
 use Cluion\Migrafold\Output\SourceMigration;
 use Cluion\Migrafold\Replay\Exception\ReplayVerificationFailed;
+use Cluion\Migrafold\Replay\ReplayVerifierResolver;
 use Cluion\Migrafold\Replay\SchemaReplayComparator;
 use Cluion\Migrafold\Replay\SqliteReplayVerifier;
 use Cluion\Migrafold\Schema\SqliteSchemaInspector;
+use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\Filesystem;
@@ -107,7 +109,7 @@ PHP,
     {
         $catalog = $this->catalog([
             '2020_01_01_000000_create_users_table' => $this->createUsersMigration(),
-            '2020_01_02_000000_seed_system_user' => <<<'PHP'
+            '2030_01_02_000000_seed_system_user' => <<<'PHP'
 <?php
 
 use Illuminate\Database\Migrations\Migration;
@@ -140,6 +142,39 @@ PHP,
         self::assertSame([], $result->analysis->blocking());
         self::assertSame($result->source->fingerprint(), $result->baseline->fingerprint());
         self::assertFalse(Schema::hasTable('users'));
+        $this->assertDirectoryIsEmpty($temporaryRoot);
+    }
+
+    public function test_preserved_migration_that_sorts_before_the_baseline_is_rejected(): void
+    {
+        $catalog = $this->catalog([
+            '2020_01_01_000000_create_users_table' => $this->createUsersMigration(),
+            '2020_01_02_000000_seed_system_user' => <<<'PHP'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        DB::table('users')->insert(['email' => 'system@example.test']);
+    }
+
+    public function down(): void {}
+};
+PHP,
+        ]);
+        $temporaryRoot = $this->migrationDirectory([]);
+
+        try {
+            $this->verifier($this->databases(), $temporaryRoot)->verify($catalog, '2026_09_12');
+            self::fail('Unsafe preserved migration ordering unexpectedly passed verification.');
+        } catch (ReplayVerificationFailed $exception) {
+            self::assertStringContainsString('must sort before preserved migration', $exception->getMessage());
+        }
+
         $this->assertDirectoryIsEmpty($temporaryRoot);
     }
 
@@ -219,6 +254,17 @@ PHP,
         $this->expectExceptionMessage('source schema fingerprint');
 
         (new SchemaReplayComparator())->assertEquivalent($source, $baseline);
+    }
+
+    public function test_resolver_fails_closed_when_same_engine_replay_is_unavailable(): void
+    {
+        $connection = $this->createStub(Connection::class);
+        $connection->method('getDriverName')->willReturn('mysql');
+
+        $this->expectException(ReplayVerificationFailed::class);
+        $this->expectExceptionMessage('same-engine replay is not implemented for [mysql]');
+
+        (new ReplayVerifierResolver($this->databases(), new Filesystem()))->resolve($connection);
     }
 
     /**

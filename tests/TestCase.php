@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests;
 
 use Cluion\Migrafold\MigrafoldServiceProvider;
+use Cluion\Migrafold\Planning\CompactionPlanner;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Connection;
@@ -115,6 +116,11 @@ abstract class TestCase extends OrchestraTestCase
         }
 
         return $manager->connection('testing');
+    }
+
+    protected function compactionPlanner(): CompactionPlanner
+    {
+        return $this->application()->make(CompactionPlanner::class);
     }
 
     private function application(): Application

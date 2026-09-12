@@ -6,7 +6,6 @@ namespace Tests\Feature\Console;
 
 use Cluion\Migrafold\Activation\MigrationTableNameResolver;
 use Cluion\Migrafold\Console\PlanCommand;
-use Cluion\Migrafold\Planning\CompactionPlanner;
 use Cluion\Migrafold\Planning\MigrationSourceAdapterFactory;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
@@ -18,6 +17,7 @@ use RuntimeException;
 use Symfony\Component\Console\Application as ConsoleApplication;
 use Symfony\Component\Console\Tester\CommandTester;
 use Tests\TestCase;
+use Tests\Support\MigrationSource;
 
 final class PlanCommandTest extends TestCase
 {
@@ -42,7 +42,7 @@ final class PlanCommandTest extends TestCase
         $root = $this->root();
         $source = $this->write(
             $root.'/database/migrations/2020_01_01_000000_create_users_table.php',
-            "<?php\n// source migration\n",
+            MigrationSource::users(uniqueEmail: false),
         );
         $tester = $this->tester($root);
         $status = $tester->execute([
@@ -81,7 +81,7 @@ final class PlanCommandTest extends TestCase
         $root = $this->root();
         $source = $this->write(
             $root.'/database/migrations/2020_01_01_000000_create_users_table.php',
-            "<?php\n// source migration\n",
+            MigrationSource::users(uniqueEmail: false),
         );
         $tester = $this->tester($root);
         $status = $tester->execute([
@@ -106,7 +106,7 @@ final class PlanCommandTest extends TestCase
             $laravel,
             new MigrationTableNameResolver($this->config()),
             new MigrationSourceAdapterFactory(),
-            new CompactionPlanner(),
+            $this->compactionPlanner(),
         );
         $command->setLaravel($this->testApplication());
         $console = new ConsoleApplication();
