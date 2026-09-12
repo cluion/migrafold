@@ -49,6 +49,77 @@ $call = static function (string $command, array $arguments = []) use ($invoke): 
     return $output;
 };
 
+$verifyInstalled = static function (
+    string $baselinePath,
+    int $expectedBatch,
+) use ($call, $connection, $manifest): void {
+    $baseline = pathinfo($baselinePath, PATHINFO_FILENAME);
+    $paths = [$baselinePath, $manifest];
+    $hashes = [];
+
+    foreach ($paths as $path) {
+        $hash = hash_file('sha256', $path);
+
+        if (! is_string($hash)) {
+            throw new RuntimeException("Unable to fingerprint verified consumer file [{$path}].");
+        }
+
+        $hashes[$path] = $hash;
+    }
+
+    $recordsBefore = array_map(
+        static fn (object $record): array => (array) $record,
+        $connection->table('migrations')->orderBy('id')->get(['id', 'migration', 'batch'])->all(),
+    );
+    $output = $call('migrafold:verify', [
+        '--json' => true,
+        '--no-interaction' => true,
+    ]);
+    $verification = json_decode($output, true, flags: JSON_THROW_ON_ERROR);
+    $schemaSummary = is_array($verification) ? ($verification['schema'] ?? null) : null;
+    $manifestSummary = is_array($verification) ? ($verification['manifests'] ?? null) : null;
+    $migrationSummary = is_array($verification) ? ($verification['migrations'] ?? null) : null;
+    $recordSummary = is_array($verification) ? ($verification['records'] ?? null) : null;
+
+    if (! is_array($verification)
+        || ($verification['verified'] ?? null) !== true
+        || ! is_array($schemaSummary)
+        || ($schemaSummary['driver'] ?? null) !== 'sqlite'
+        || ! is_string($schemaSummary['fingerprint'] ?? null)
+        || preg_match('/\A[a-f0-9]{64}\z/', $schemaSummary['fingerprint']) !== 1
+        || $manifestSummary !== [[
+            'owner' => 'laravel:application',
+            'path' => $manifest,
+        ]]
+        || ! is_array($migrationSummary)
+        || ($migrationSummary['compacted'] ?? null) !== ['2020_01_01_000000_create_users_table']
+        || ($migrationSummary['preserved'] ?? null) !== []
+        || ($migrationSummary['baselines'] ?? null) !== [$baseline]
+        || ($migrationSummary['untracked'] ?? null) !== []
+        || ! is_array($recordSummary)
+        || ($recordSummary['table'] ?? null) !== 'migrations'
+        || ($recordSummary['baseline_batch'] ?? null) !== $expectedBatch
+        || ($recordSummary['preserved_recorded'] ?? null) !== []
+        || ($recordSummary['preserved_pending'] ?? null) !== []) {
+        throw new RuntimeException('Installed consumer verification did not report the expected exact scope.');
+    }
+
+    foreach ($hashes as $path => $hash) {
+        if (hash_file('sha256', $path) !== $hash) {
+            throw new RuntimeException("Consumer verification changed file [{$path}].");
+        }
+    }
+
+    $recordsAfter = array_map(
+        static fn (object $record): array => (array) $record,
+        $connection->table('migrations')->orderBy('id')->get(['id', 'migration', 'batch'])->all(),
+    );
+
+    if ($recordsAfter !== $recordsBefore) {
+        throw new RuntimeException('Consumer verification changed migration records.');
+    }
+};
+
 $call('migrate', ['--force' => true, '--no-interaction' => true]);
 
 if (! $schema->hasTable('users')) {
@@ -96,6 +167,8 @@ if ($records !== [$baseline]) {
     throw new RuntimeException('Consumer compaction did not activate the exact baseline record scope.');
 }
 
+$verifyInstalled($baselines[0], 2);
+
 $schema->dropAllTables();
 $call('migrate', ['--force' => true, '--no-interaction' => true]);
 
@@ -104,6 +177,8 @@ if (! $schema->hasTable('users')
     || $connection->table('migrations')->pluck('migration')->all() !== [$baseline]) {
     throw new RuntimeException('Installed baseline did not replay on a fresh consumer database.');
 }
+
+$verifyInstalled($baselines[0], 1);
 
 $schema->dropAllTables();
 
@@ -171,7 +246,7 @@ $call('migrafold:compact', [
     '--no-interaction' => true,
 ]);
 
-$deleteBaseline = (static function (string $directory, string $source, string $manifest): string {
+$deleteBaselinePath = (static function (string $directory, string $source, string $manifest): string {
     clearstatcache();
     $baselines = glob($directory.'/2026_09_12_*_create_users_baseline.php');
 
@@ -183,12 +258,15 @@ $deleteBaseline = (static function (string $directory, string $source, string $m
         throw new RuntimeException('Confirmed consumer deletion did not produce the expected filesystem state.');
     }
 
-    return pathinfo($baselines[0], PATHINFO_FILENAME);
+    return $baselines[0];
 })($migrationDirectory, $source, $manifest);
+$deleteBaseline = pathinfo($deleteBaselinePath, PATHINFO_FILENAME);
 
 if ($connection->table('migrations')->orderBy('id')->pluck('migration')->all() !== [$deleteBaseline]) {
     throw new RuntimeException('Confirmed consumer deletion did not activate the exact baseline record scope.');
 }
+
+$verifyInstalled($deleteBaselinePath, 2);
 
 $schema->dropAllTables();
 $call('migrate', ['--force' => true, '--no-interaction' => true]);
@@ -199,12 +277,18 @@ if (! $schema->hasTable('users')
     throw new RuntimeException('Delete-mode baseline did not replay on a fresh consumer database.');
 }
 
+$verifyInstalled($deleteBaselinePath, 1);
+
 fwrite(STDOUT, json_encode([
     'laravel' => Application::VERSION,
     'archive' => true,
     'activation' => true,
+    'archive_verify' => true,
     'fresh_replay' => true,
+    'archive_fresh_verify' => true,
     'delete_refusal_unchanged' => true,
     'delete' => true,
+    'delete_verify' => true,
     'delete_fresh_replay' => true,
+    'delete_fresh_verify' => true,
 ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).PHP_EOL);
