@@ -31,4 +31,26 @@ MIGRAFOLD_DB_USERNAME=root \
 MIGRAFOLD_DB_PASSWORD=migrafold \
 "$project_root/vendor/bin/phpunit" --configuration "$project_root/phpunit.database.xml.dist"
 
+MIGRAFOLD_DATABASE_TESTS=1 \
+MIGRAFOLD_DB_DRIVER=pgsql \
+MIGRAFOLD_DB_HOST=127.0.0.1 \
+MIGRAFOLD_DB_PORT=15432 \
+MIGRAFOLD_DB_DATABASE=migrafold_postgres16_testing \
+MIGRAFOLD_DB_USERNAME=migrafold \
+MIGRAFOLD_DB_PASSWORD=migrafold \
+"$project_root/vendor/bin/phpunit" \
+    --configuration "$project_root/phpunit.database.xml.dist" \
+    --filter PostgresSchemaInspectorTest
+
+MIGRAFOLD_DATABASE_TESTS=1 \
+MIGRAFOLD_DB_DRIVER=pgsql \
+MIGRAFOLD_DB_HOST=127.0.0.1 \
+MIGRAFOLD_DB_PORT=15433 \
+MIGRAFOLD_DB_DATABASE=migrafold_postgres17_testing \
+MIGRAFOLD_DB_USERNAME=migrafold \
+MIGRAFOLD_DB_PASSWORD=migrafold \
+"$project_root/vendor/bin/phpunit" \
+    --configuration "$project_root/phpunit.database.xml.dist" \
+    --filter PostgresSchemaInspectorTest
+
 "$project_root/tests/DatabaseConsumer/run"
