@@ -6,6 +6,7 @@ namespace Cluion\Migrafold;
 
 use Cluion\Migrafold\Console\CompactCommand;
 use Cluion\Migrafold\Console\PlanCommand;
+use Cluion\Migrafold\Console\VerifyCommand;
 use Illuminate\Support\ServiceProvider;
 
 final class MigrafoldServiceProvider extends ServiceProvider
@@ -25,6 +26,7 @@ final class MigrafoldServiceProvider extends ServiceProvider
             $this->commands([
                 CompactCommand::class,
                 PlanCommand::class,
+                VerifyCommand::class,
             ]);
         }
     }

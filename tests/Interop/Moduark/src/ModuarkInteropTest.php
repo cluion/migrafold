@@ -9,11 +9,14 @@ use Cluion\Migrafold\Execution\CompactionExecutor;
 use Cluion\Migrafold\MigrafoldServiceProvider;
 use Cluion\Migrafold\Planning\CompactionPlanner;
 use Cluion\Migrafold\Planning\MigrationSourceAdapterFactory;
+use Cluion\Migrafold\Verification\Exception\ManifestVerificationFailed;
+use Cluion\Migrafold\Verification\InstalledCompactionVerifier;
 use Cluion\Moduark\ModuarkServiceProvider;
 use Cluion\Moduark\Persistence\TableOwnershipIndex;
 use Cluion\Moduark\Registry\ModuleRegistry;
 use Cluion\Moduark\Resources\ResourceManifest;
 use Closure;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
@@ -131,6 +134,8 @@ final class ModuarkInteropTest extends TestCase
         $root = $this->root();
         $moduleDirectory = $root.'/app/Modules/Billing/Database/Migrations';
         $source = $moduleDirectory.'/2020_01_01_000000_create_invoices_table.php';
+        $preservedName = '2030_01_01_000000_seed_invoice';
+        $preservedSource = $moduleDirectory.'/'.$preservedName.'.php';
         $registry = $this->application()->make(ModuleRegistry::class);
         $resources = $this->application()->make(ResourceManifest::class);
         $ownership = $this->application()->make(TableOwnershipIndex::class);
@@ -166,8 +171,14 @@ final class ModuarkInteropTest extends TestCase
         self::assertSame($moduleDirectory, $plan->output->owners[0]->output->directory);
         self::assertNotNull($archive);
         $this->connection()->table('migrations')->insert([
-            'migration' => '2020_01_01_000000_create_invoices_table',
-            'batch' => 1,
+            [
+                'migration' => '2020_01_01_000000_create_invoices_table',
+                'batch' => 1,
+            ],
+            [
+                'migration' => $preservedName,
+                'batch' => 2,
+            ],
         ]);
 
         $result = (new CompactionExecutor())->execute($plan, $this->connection());
@@ -175,18 +186,129 @@ final class ModuarkInteropTest extends TestCase
         self::assertTrue($result->clean());
         self::assertFileDoesNotExist($source);
         self::assertFileExists($archive);
+        self::assertFileExists($preservedSource);
         self::assertFileExists($moduleDirectory.'/'.$baselineName.'.php');
         self::assertFileExists($manifestPath);
         $manifest = json_decode((string) file_get_contents($manifestPath), true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($manifest);
         self::assertSame('migrafold-manifest-v2', $manifest['format_version']);
         self::assertSame('moduark:Billing', $manifest['migration_scope']['compacted'][0]['owner']);
-        self::assertSame([], $manifest['migration_scope']['preserved']);
+        self::assertSame([$preservedName], array_column($manifest['migration_scope']['preserved'], 'name'));
         self::assertSame('sqlite', $manifest['verification']['driver']);
         self::assertSame(
-            [$baselineName],
+            [$preservedName, $baselineName],
             $this->connection()->table('migrations')->pluck('migration')->all(),
         );
+        $verification = (new InstalledCompactionVerifier())->verify(
+            $root,
+            $this->connection(),
+            $adapters,
+        );
+        self::assertSame('sqlite', $verification->driver);
+        self::assertSame([$baselineName], $verification->baselines);
+        self::assertSame(['2020_01_01_000000_create_invoices_table'], $verification->compacted);
+        self::assertSame([$preservedName], $verification->preserved);
+        self::assertSame([$preservedName], $verification->preservedRecorded);
+        self::assertSame([], $verification->preservedPending);
+        self::assertSame(3, $verification->baselineBatch);
+        self::assertSame([], $verification->untrackedMigrations);
+        $verifiedPaths = [
+            $moduleDirectory.'/'.$baselineName.'.php',
+            $manifestPath,
+            $preservedSource,
+        ];
+        $hashesBeforeCommand = array_map('hash_file', array_fill(0, 3, 'sha256'), $verifiedPaths);
+        $recordsBeforeCommand = array_map(
+            static fn (object $record): array => (array) $record,
+            $this->connection()->table('migrations')->orderBy('id')->get()->all(),
+        );
+        $kernel = $this->application()->make(Kernel::class);
+        $status = $kernel->call('migrafold:verify', [
+            '--connection' => 'testing',
+            '--json' => true,
+        ]);
+        $commandOutput = $kernel->output();
+        self::assertSame(0, $status);
+        self::assertStringContainsString('"verified": true', $commandOutput);
+        self::assertStringContainsString('"preserved_recorded"', $commandOutput);
+        self::assertSame(
+            $hashesBeforeCommand,
+            array_map('hash_file', array_fill(0, 3, 'sha256'), $verifiedPaths),
+        );
+        self::assertSame(
+            $recordsBeforeCommand,
+            array_map(
+                static fn (object $record): array => (array) $record,
+                $this->connection()->table('migrations')->orderBy('id')->get()->all(),
+            ),
+        );
+
+        self::assertSame(
+            1,
+            $this->connection()->table('migrations')->where('migration', $preservedName)->delete(),
+        );
+        $pendingVerification = (new InstalledCompactionVerifier())->verify(
+            $root,
+            $this->connection(),
+            $adapters,
+        );
+        self::assertSame([], $pendingVerification->preservedRecorded);
+        self::assertSame([$preservedName], $pendingVerification->preservedPending);
+        self::assertSame(
+            0,
+            $this->connection()->table('migrations')->where('migration', $preservedName)->count(),
+        );
+        self::assertTrue($this->connection()->table('migrations')->insert([
+            'migration' => $preservedName,
+            'batch' => 2,
+        ]));
+
+        $baselinePath = $moduleDirectory.'/'.$baselineName.'.php';
+        $baselineContents = file_get_contents($baselinePath);
+        self::assertIsString($baselineContents);
+        self::assertNotFalse(file_put_contents($baselinePath, $baselineContents."\n// tampered\n"));
+        $records = $this->connection()->table('migrations')->orderBy('id')->pluck('migration')->all();
+        $failedStatus = $kernel->call('migrafold:verify', [
+            '--connection' => 'testing',
+        ]);
+        $failedOutput = $kernel->output();
+        self::assertSame(1, $failedStatus);
+        self::assertStringContainsString('does not match its manifest fingerprint', $failedOutput);
+
+        try {
+            (new InstalledCompactionVerifier())->verify($root, $this->connection(), $adapters);
+            self::fail('Expected a tampered baseline to fail verification.');
+        } catch (ManifestVerificationFailed $exception) {
+            self::assertStringContainsString('does not match its manifest fingerprint', $exception->getMessage());
+        }
+
+        self::assertSame($records, $this->connection()->table('migrations')->orderBy('id')->pluck('migration')->all());
+        self::assertTrue($this->connection()->getSchemaBuilder()->hasTable('invoices'));
+        self::assertNotFalse(file_put_contents($baselinePath, $baselineContents));
+        self::assertSame(1, $this->connection()->table('migrations')->where('migration', $baselineName)->delete());
+
+        try {
+            (new InstalledCompactionVerifier())->verify($root, $this->connection(), $adapters);
+            self::fail('Expected a missing baseline record to fail verification.');
+        } catch (ManifestVerificationFailed $exception) {
+            self::assertStringContainsString('is missing or duplicated', $exception->getMessage());
+        }
+
+        self::assertSame(0, $this->connection()->table('migrations')->where('migration', $baselineName)->count());
+        self::assertTrue($this->connection()->table('migrations')->insert([
+            'migration' => $baselineName,
+            'batch' => 3,
+        ]));
+        $this->connection()->getSchemaBuilder()->table('invoices', static function (Blueprint $table): void {
+            $table->string('drift')->nullable();
+        });
+
+        try {
+            (new InstalledCompactionVerifier())->verify($root, $this->connection(), $adapters);
+            self::fail('Expected schema drift to fail verification.');
+        } catch (ManifestVerificationFailed $exception) {
+            self::assertStringContainsString('schema does not match', $exception->getMessage());
+        }
     }
 
     private function createFixture(): void
@@ -250,6 +372,27 @@ return new class extends Migration
     {
         Schema::dropIfExists('invoices');
     }
+};
+PHP,
+        );
+        $this->write(
+            $resolved.'/app/Modules/Billing/Database/Migrations/2030_01_01_000000_seed_invoice.php',
+            <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        DB::table('invoices')->insert(['number' => 'SYSTEM']);
+    }
+
+    public function down(): void {}
 };
 PHP,
         );

@@ -8,6 +8,7 @@ use Cluion\Migrafold\Discovery\LaravelMigrationSourceAdapter;
 use Cluion\Migrafold\Discovery\MigrationCatalog;
 use Cluion\Migrafold\Discovery\MigrationDiscoverer;
 use Cluion\Migrafold\Disposition\SourceDispositionMode;
+use Cluion\Migrafold\Execution\CompactionExecutor;
 use Cluion\Migrafold\Planning\CompactionPlanner;
 use Cluion\Migrafold\Replay\Exception\ReplayVerificationFailed;
 use Cluion\Migrafold\Replay\MySqlReplaySandboxManager;
@@ -15,6 +16,7 @@ use Cluion\Migrafold\Replay\MySqlReplayVerifier;
 use Cluion\Migrafold\Replay\ReplayVerifierResolver;
 use Cluion\Migrafold\Schema\Exception\UnsupportedSchemaFeature;
 use Cluion\Migrafold\Schema\MySqlSchemaInspector;
+use Cluion\Migrafold\Verification\InstalledCompactionVerifier;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connectors\ConnectionFactory;
 use Illuminate\Database\DatabaseManager;
@@ -146,11 +148,12 @@ final class MySqlReplayVerifierTest extends TestCase
         self::assertSame([], $this->sandboxDatabases());
         $this->assertDirectoryIsEmpty($temporaryRoot);
 
+        $adapters = [new LaravelMigrationSourceAdapter($root)];
         $planner = new CompactionPlanner(new ReplayVerifierResolver($this->databases, $files));
         $plan = $planner->plan(
             $root,
             $this->connection,
-            [new LaravelMigrationSourceAdapter($root)],
+            $adapters,
             '2026_09_12',
             SourceDispositionMode::Archive,
             '2026-09-12T120000Z',
@@ -192,6 +195,21 @@ final class MySqlReplayVerifierTest extends TestCase
         );
         self::assertSame([], $this->sandboxDatabases());
         $this->assertDirectoryIsEmpty($temporaryRoot);
+        $execution = (new CompactionExecutor())->execute($plan, $this->connection);
+        self::assertTrue($execution->clean());
+        $installed = (new InstalledCompactionVerifier())->verify(
+            $root,
+            $this->connection,
+            $adapters,
+        );
+        self::assertSame($this->environment('MIGRAFOLD_DB_DRIVER'), $installed->driver);
+        self::assertSame($plan->activation->baselineNames(), $installed->baselines);
+        self::assertSame(
+            ['2030_01_01_000000_seed_system_user'],
+            $installed->preservedRecorded,
+        );
+        self::assertSame(2, $installed->baselineBatch);
+        self::assertSame([], $installed->untrackedMigrations);
     }
 
     public function test_cleanup_refuses_a_tampered_ownership_marker(): void

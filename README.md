@@ -38,6 +38,7 @@ The current implementation includes:
 - SQLite, MySQL, and MariaDB source/baseline replay in separate temporary databases, including current-database fingerprint verification and baseline-before-preserved ordering checks.
 - Exact compacted scope propagation: preserved migrations remain in place and their migration records are not retired.
 - Planner-generated v2 manifests that record the global compacted/preserved migration scope and same-engine replay fingerprints without database credentials or temporary sandbox identities.
+- A read-only `migrafold:verify` command for detecting manifest, migration file, migration record, and current-schema drift after compaction.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
 ## Preview a compaction
@@ -80,6 +81,18 @@ php artisan migrafold:compact \
 ```
 
 Archive mode remains the default. The execution command has no general force bypass.
+
+## Verify an installed compaction
+
+After compaction, verify the published state without creating sandboxes or changing files and database records:
+
+```bash
+php artisan migrafold:verify
+```
+
+Use `--connection=<name>` to select a database connection or `--json` for machine-readable output. Verification requires every discovered v2 owner manifest to share the same global audit scope, checks baseline and preserved file fingerprints, confirms that compacted sources and records are gone, and requires every baseline record to exist exactly once in one batch. A preserved migration record may be present or pending, but duplicates fail closed.
+
+The current database driver and schema fingerprint must still match the manifest. Migrations added after compaction are reported as untracked; schema changes made by them are reported as drift. Only currently active Laravel, Moduark, and nWidart owners are discovered, so manifests belonging exclusively to inactive Modules are outside the command's verified scope.
 
 When all three Moduark runtime services are available, active Module migration directories and table ownership are included automatically. A partial Moduark runtime fails closed instead of silently producing an incomplete plan.
 

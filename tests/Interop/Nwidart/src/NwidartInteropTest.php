@@ -9,6 +9,7 @@ use Cluion\Migrafold\Execution\CompactionExecutor;
 use Cluion\Migrafold\MigrafoldServiceProvider;
 use Cluion\Migrafold\Planning\CompactionPlanner;
 use Cluion\Migrafold\Planning\MigrationSourceAdapterFactory;
+use Cluion\Migrafold\Verification\InstalledCompactionVerifier;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
@@ -235,6 +236,17 @@ PHP,
             [$baselineName],
             $this->connection()->table('migrations')->pluck('migration')->all(),
         );
+        $verification = (new InstalledCompactionVerifier())->verify(
+            $root,
+            $this->connection(),
+            $adapters,
+        );
+        self::assertSame('sqlite', $verification->driver);
+        self::assertSame([$baselineName], $verification->baselines);
+        self::assertSame(['2020_01_01_000000_create_invoices_table'], $verification->compacted);
+        self::assertSame([], $verification->preserved);
+        self::assertSame(2, $verification->baselineBatch);
+        self::assertSame([], $verification->untrackedMigrations);
     }
 
     private function connection(): Connection
