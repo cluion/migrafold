@@ -5,6 +5,5 @@ parameters:
         - tests/Feature
         - tests/Fixtures
         - tests/Integration
-        - tests/Unit
         - tests/TestCase.php
     tmpDir: .phpstan
