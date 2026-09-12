@@ -13,7 +13,7 @@ final class SchemaInspectorResolverTest extends TestCase
 {
     public function test_it_resolves_the_postgres_inspector(): void
     {
-        $connection = $this->createMock(Connection::class);
+        $connection = $this->createStub(Connection::class);
         $connection->method('getDriverName')->willReturn('pgsql');
 
         self::assertInstanceOf(

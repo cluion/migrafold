@@ -53,4 +53,9 @@ MIGRAFOLD_DB_PASSWORD=migrafold \
     --configuration "$project_root/phpunit.database.xml.dist" \
     --filter 'Postgres(SchemaInspector|ReplayVerifier)Test'
 
+MIGRAFOLD_CONSUMER_DISPOSITION=archive \
+"$project_root/tests/DatabaseConsumer/run"
+
+MIGRAFOLD_CONSUMER_DATABASE=postgres \
+MIGRAFOLD_CONSUMER_DISPOSITION=delete \
 "$project_root/tests/DatabaseConsumer/run"

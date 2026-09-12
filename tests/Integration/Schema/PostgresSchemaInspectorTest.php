@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Schema;
 
+use Cluion\Migrafold\Activation\DatabaseMigrationRecordTransaction;
+use Cluion\Migrafold\Activation\Exception\MigrationRecordActivationFailed;
 use Cluion\Migrafold\Migration\BaselineMigrationGenerator;
 use Cluion\Migrafold\Migration\GeneratedMigration;
 use Cluion\Migrafold\Schema\Exception\UnsupportedSchemaFeature;
 use Cluion\Migrafold\Schema\PostgresSchemaInspector;
 use Illuminate\Database\PostgresConnection;
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Facade;
 use PDO;
@@ -194,6 +197,96 @@ SQL);
         self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
     }
 
+    public function test_migration_record_transaction_commits_and_releases_its_lock(): void
+    {
+        $this->createMigrationRepository();
+        $transaction = new DatabaseMigrationRecordTransaction(1);
+
+        $first = $transaction->run(
+            $this->connection,
+            'integration:migrations',
+            function (): string {
+                $this->connection->table('migrations')->insert([
+                    'migration' => '2026_09_12_000001_create_users_baseline',
+                    'batch' => 1,
+                ]);
+
+                return 'committed';
+            },
+        );
+        $second = $transaction->run(
+            $this->connection,
+            'integration:migrations',
+            fn (): int => $this->connection->table('migrations')->count(),
+        );
+
+        self::assertSame('committed', $first);
+        self::assertSame(1, $second);
+        self::assertSame(0, $this->connection->transactionLevel());
+    }
+
+    public function test_migration_record_transaction_rolls_back_and_releases_its_lock(): void
+    {
+        $this->createMigrationRepository();
+        $transaction = new DatabaseMigrationRecordTransaction(1);
+
+        try {
+            $transaction->run(
+                $this->connection,
+                'integration:migrations',
+                function (): void {
+                    $this->connection->table('migrations')->insert([
+                        'migration' => '2026_09_12_000001_create_users_baseline',
+                        'batch' => 1,
+                    ]);
+
+                    throw new RuntimeException('simulated transaction failure');
+                },
+            );
+        } catch (RuntimeException $exception) {
+            self::assertSame('simulated transaction failure', $exception->getMessage());
+        }
+
+        $count = $transaction->run(
+            $this->connection,
+            'integration:migrations',
+            fn (): int => $this->connection->table('migrations')->count(),
+        );
+
+        self::assertSame(0, $count);
+        self::assertSame(0, $this->connection->transactionLevel());
+    }
+
+    public function test_migration_record_transaction_refuses_a_contended_lock_without_waiting(): void
+    {
+        $contender = $this->newConnection();
+        $transaction = new DatabaseMigrationRecordTransaction(0);
+
+        try {
+            $transaction->run(
+                $this->connection,
+                'integration:migrations',
+                function () use ($contender, $transaction): void {
+                    try {
+                        $transaction->run($contender, 'integration:migrations', static fn (): null => null);
+                        self::fail('Contended PostgreSQL advisory lock was unexpectedly acquired.');
+                    } catch (MigrationRecordActivationFailed $exception) {
+                        self::assertStringContainsString(
+                            'could not acquire the PostgreSQL migration-record advisory lock',
+                            $exception->getMessage(),
+                        );
+                    }
+
+                    self::assertSame(0, $contender->transactionLevel());
+                },
+            );
+        } finally {
+            $contender->disconnect();
+        }
+
+        self::assertSame(0, $this->connection->transactionLevel());
+    }
+
     public function test_it_refuses_non_public_search_paths(): void
     {
         $connection = new PostgresConnection(
@@ -354,6 +447,36 @@ comment on table users is 'Application users';
 comment on column users.email is 'Login address';
 create index users_lookup_index on users (nickname, email)
 SQL);
+    }
+
+    private function createMigrationRepository(): void
+    {
+        $this->connection->getSchemaBuilder()->create('migrations', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->string('migration');
+            $table->integer('batch');
+        });
+    }
+
+    private function newConnection(): PostgresConnection
+    {
+        $database = $this->environment('MIGRAFOLD_DB_DATABASE');
+        $pdo = new PDO(
+            'pgsql:host='.$this->environment('MIGRAFOLD_DB_HOST')
+                .';port='.$this->environment('MIGRAFOLD_DB_PORT')
+                .';dbname='.$database,
+            $this->environment('MIGRAFOLD_DB_USERNAME'),
+            $this->environment('MIGRAFOLD_DB_PASSWORD'),
+            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION],
+        );
+
+        return new PostgresConnection($pdo, $database, '', [
+            'driver' => 'pgsql',
+            'database' => $database,
+            'schema' => 'public',
+            'search_path' => 'public',
+            'prefix' => '',
+        ]);
     }
 
     private function expectUnsupported(string $feature): void

@@ -43,6 +43,26 @@ final class CompactionManifestReaderTest extends TestCase
         ));
     }
 
+    public function test_it_reads_postgres_replay_metadata(): void
+    {
+        [$root, $owner] = $this->fixture();
+        $payload = $this->manifest();
+        $schema = $payload['schema'] ?? null;
+        $verification = $payload['verification'] ?? null;
+        self::assertIsArray($schema);
+        self::assertIsArray($verification);
+        $schema['driver'] = 'pgsql';
+        $verification['driver'] = 'pgsql';
+        $payload['schema'] = $schema;
+        $payload['verification'] = $verification;
+        $this->writeManifest($owner, $payload);
+
+        $manifest = (new CompactionManifestReader())->read($root, $owner);
+
+        self::assertNotNull($manifest);
+        self::assertSame('pgsql', $manifest->driver);
+    }
+
     public function test_it_rejects_a_manifest_whose_owner_does_not_match_discovery(): void
     {
         [$root, $owner] = $this->fixture();

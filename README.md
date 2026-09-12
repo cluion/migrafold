@@ -12,7 +12,7 @@ The planned first release targets:
 
 - PHP 8.2 or newer.
 - Laravel 12 and 13.
-- SQLite, MySQL, and MariaDB with same-engine verification.
+- SQLite, MySQL, MariaDB, and PostgreSQL with same-engine verification.
 - Plain Laravel, Moduark, and nWidart Module discovery.
 - Archive by default; explicit confirmation for deletion.
 - Manifest-scoped migration-record activation instead of truncating the repository.
@@ -24,6 +24,7 @@ The current implementation includes:
 - Framework-lifecycle fixtures for Laravel's pending-list, migration-log, existing-table guard, and fail-closed rollback behavior.
 - A read-only SQLite schema inspector for columns, defaults, collations, generated columns, indexes, and foreign keys.
 - A read-only MySQL/MariaDB inspector with real-server coverage and fail-closed detection for schema details that are not yet representable.
+- A read-only PostgreSQL inspector with PostgreSQL 16/17 coverage, lossless Blueprint mapping, and fail-closed detection for unsupported schemas.
 - Canonical, deterministic JSON snapshots with SHA-256 fingerprints and an explicit capability report.
 - A deterministic per-table PHP migration generator with dependency ordering, existing-table guards, and irreversible rollback protection.
 - A dry-run-first output writer with collision refusal, verified file publication, and deterministic manifests.
@@ -35,7 +36,7 @@ The current implementation includes:
 - A recoverable execution coordinator that retains private source checkpoints until record activation commits and compensates filesystem changes on failure.
 - An explicitly confirmed `migrafold:compact` command with whole-plan fingerprint binding and a second confirmation for permanent deletion.
 - Catalog-wide AST classification that compacts schema-only migrations, preserves data-only migrations, and blocks mixed, raw, dynamic, unsupported, or invalid migrations.
-- SQLite, MySQL, and MariaDB source/baseline replay in separate temporary databases, including current-database fingerprint verification and baseline-before-preserved ordering checks.
+- SQLite, MySQL, MariaDB, and PostgreSQL source/baseline replay in separate temporary databases, including current-database fingerprint verification and baseline-before-preserved ordering checks.
 - Exact compacted scope propagation: preserved migrations remain in place and their migration records are not retired.
 - Planner-generated v2 manifests that record the global compacted/preserved migration scope and same-engine replay fingerprints without database credentials or temporary sandbox identities.
 - A read-only `migrafold:verify` command for detecting manifest, migration file, migration record, and current-schema drift after compaction.
@@ -51,7 +52,7 @@ php artisan migrafold:plan \
 
 Use `--json` for machine-readable output or `--delete` to preview permanent source deletion. The command replays source and generated migrations in task-specific temporary databases, then removes them. It does not change the selected database, move or delete source files, publish baselines, or activate migration records.
 
-SQLite sandboxes are local temporary files. MySQL and MariaDB sandboxes are separate databases on the selected server, created with a fixed `migrafold_replay_` prefix and random identity. Cleanup requires the expected name, token, server identity, and database-resident ownership marker to match. The selected database account must be allowed to create and drop databases. Cross-database foreign keys, active source transactions, and non-empty table prefixes fail closed.
+SQLite sandboxes are local temporary files. MySQL, MariaDB, and PostgreSQL sandboxes are separate databases on the selected server, created with a fixed `migrafold_replay_` prefix and random identity. Cleanup requires the expected name, token, server identity, and database-resident ownership marker to match. The selected database account must be allowed to create and drop databases. PostgreSQL replay additionally requires an exact `public` search path and access to the server identity returned by `pg_control_system()`. Cross-database or cross-schema foreign keys, active source transactions, and non-empty table prefixes fail closed.
 
 The plan output includes a fingerprint covering the schema, source fingerprints, migration classifications and actions, owner paths, generated outputs, source disposition, migration table, and record replacement scope. Data-only migrations are reported under `analysis.preserve`; their row data is replayed for execution safety but is not compared for equality.
 
@@ -119,11 +120,12 @@ Migrafold renders the inspected physical schema rather than trying to recover th
 - Signed and unsigned integer families, booleans, and safe auto-increment primary keys.
 - `char`, `varchar`, text families, and JSON.
 - Date, datetime, timestamp, time, and year columns with available precision.
-- Decimal, SQLite numeric, float, and double columns, including MySQL/MariaDB unsigned modifiers.
+- Decimal, SQLite numeric, float, and double columns, including MySQL/MariaDB unsigned modifiers and PostgreSQL `real`/`double precision` defaults.
+- PostgreSQL `bytea`, `jsonb`, signed serial columns, and timestamp/time columns with time zone.
 - Enum, set, blob, fixed binary, and variable binary columns.
 - Nullable values, raw defaults, collations, comments, and virtual or stored generated expressions where the database exposes them.
 
-Types or modifiers without a lossless Blueprint representation stop generation with `MGF-GENERATE-001`. Examples include bit fields, precision-bearing SQLite numeric declarations, ambiguous `real` columns, nonstandard blob sizes, and spatial columns. Existing inspector-level safety checks still reject schema features such as triggers, check constraints, expression indexes, and partial or prefix indexes before rendering.
+Types or modifiers without a lossless Blueprint representation stop generation with `MGF-GENERATE-001`. Examples include bit fields, precision-bearing SQLite numeric declarations, ambiguous SQLite `real` columns, nonstandard blob sizes, and spatial columns. Existing inspector-level safety checks still reject schema features such as triggers, check constraints, expression indexes, and partial or prefix indexes before rendering.
 
 ## Development
 
@@ -137,15 +139,15 @@ composer test:moduark
 composer test:nwidart
 ```
 
-The default tests use an in-memory SQLite database. Database integration tests start isolated MySQL 8.0 and MariaDB 11.8 containers, accept only dedicated `*_testing` databases, and remove their containers and storage after the run.
+The default tests use an in-memory SQLite database. Database integration tests start isolated MySQL 8.0, MariaDB 11.8, PostgreSQL 16, and PostgreSQL 17 containers, accept only dedicated `*_testing` databases, and remove their containers and storage after the run.
 
-Consumer acceptance exports the current Git commit, installs a non-symlinked package copy into isolated Laravel 12 and 13 applications, and verifies automatic package discovery, planning, archival compaction, delete-mode confirmation refusal, exact migration-record activation, fresh baseline replay, and installed-state verification before and after replay. Verification must leave baseline and manifest fingerprints and migration records unchanged. Development-only files and local uncommitted changes are excluded from the package under test.
+Consumer acceptance exports the current Git commit, installs a non-symlinked package copy into isolated Laravel 12 and 13 applications, and verifies automatic package discovery, planning, archive and delete compaction, exact migration-record activation, fresh baseline replay, and installed-state verification before and after replay. The real-database harness runs MySQL, MariaDB, PostgreSQL 16, and PostgreSQL 17; PostgreSQL archive and delete flows are both exercised. Verification must leave baseline and manifest fingerprints and migration records unchanged. Development-only files and local uncommitted changes are excluded from the package under test.
 
 The Moduark interoperability tests install isolated matching-major dependency sets for Laravel 12 and 13 with the current stable Moduark 1.x release. Each harness exercises the official registry, resource manifest, and table ownership runtime through baseline publication, source archival, and migration-record activation.
 
 The nWidart interoperability tests install isolated matching-major dependency sets for Laravel 12 with nWidart 12 and Laravel 13 with nWidart 13. Each harness uses its own dedicated SQLite `*_testing` database and exercises official runtime discovery through baseline publication, source archival, and migration-record activation.
 
-Continuous integration runs the core test and static-analysis suite against Laravel 12 on PHP 8.2 and Laravel 13 on PHP 8.3. Separate jobs run both interoperability harnesses across their matching Laravel majors. A path-filtered database workflow runs the same matching-major matrix against disposable MySQL 8.0 and MariaDB 11.8 containers.
+Continuous integration runs the core test and static-analysis suite against Laravel 12 on PHP 8.2 and Laravel 13 on PHP 8.3. Separate jobs run both interoperability harnesses across their matching Laravel majors. A path-filtered database workflow runs the same matching-major matrix against disposable MySQL 8.0, MariaDB 11.8, PostgreSQL 16, and PostgreSQL 17 containers, including PostgreSQL archive and delete consumer acceptance.
 
 ## Release information
 

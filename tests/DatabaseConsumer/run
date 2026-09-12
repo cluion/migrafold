@@ -10,6 +10,8 @@ temporary_root=${TMPDIR:-/tmp}
 workspace=$(mktemp -d "$temporary_root/migrafold-database-consumer.XXXXXX")
 artifact_root="$workspace/artifact"
 requested_laravel=${MIGRAFOLD_CONSUMER_LARAVEL:-all}
+requested_database=${MIGRAFOLD_CONSUMER_DATABASE:-all}
+requested_disposition=${MIGRAFOLD_CONSUMER_DISPOSITION:-archive}
 package_source=${MIGRAFOLD_CONSUMER_PACKAGE_SOURCE:-archive}
 
 cleanup() {
@@ -30,6 +32,31 @@ case "$requested_laravel" in
         ;;
     *)
         echo 'MIGRAFOLD_CONSUMER_LARAVEL must be 12, 13, or all.' >&2
+        exit 1
+        ;;
+esac
+
+case "$requested_disposition" in
+    archive|delete)
+        ;;
+    *)
+        echo 'MIGRAFOLD_CONSUMER_DISPOSITION must be archive or delete.' >&2
+        exit 1
+        ;;
+esac
+
+case "$requested_database" in
+    mysql|mariadb|postgres16|postgres17)
+        database_targets=$requested_database
+        ;;
+    postgres)
+        database_targets='postgres16 postgres17'
+        ;;
+    all)
+        database_targets='mysql mariadb postgres16 postgres17'
+        ;;
+    *)
+        echo 'MIGRAFOLD_CONSUMER_DATABASE must be mysql, mariadb, postgres16, postgres17, postgres, or all.' >&2
         exit 1
         ;;
 esac
@@ -87,15 +114,35 @@ for suite in $suites; do
         exit 1
     fi
 
-    for driver in mysql mariadb; do
-        case "$driver" in
+    for target in $database_targets; do
+        case "$target" in
             mysql)
+                driver=mysql
                 port=13306
                 database=migrafold_mysql_testing
+                username=root
+                expected_server_major=''
                 ;;
             mariadb)
+                driver=mariadb
                 port=13307
                 database=migrafold_mariadb_testing
+                username=root
+                expected_server_major=''
+                ;;
+            postgres16)
+                driver=pgsql
+                port=15432
+                database=migrafold_postgres16_testing
+                username=migrafold
+                expected_server_major=16
+                ;;
+            postgres17)
+                driver=pgsql
+                port=15433
+                database=migrafold_postgres17_testing
+                username=migrafold
+                expected_server_major=17
                 ;;
         esac
 
@@ -109,9 +156,11 @@ for suite in $suites; do
             DB_HOST=127.0.0.1 \
             DB_PORT="$port" \
             DB_DATABASE="$database" \
-            DB_USERNAME=root \
+            DB_USERNAME="$username" \
             DB_PASSWORD=migrafold \
             DB_URL='' \
+            MIGRAFOLD_EXPECTED_SERVER_MAJOR="$expected_server_major" \
+            MIGRAFOLD_CONSUMER_DISPOSITION="$requested_disposition" \
             php accept.php
         )
     done

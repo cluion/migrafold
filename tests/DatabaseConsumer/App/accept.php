@@ -13,13 +13,18 @@ require __DIR__.'/vendor/autoload.php';
 $app = require __DIR__.'/bootstrap/app.php';
 $driver = getenv('DB_CONNECTION');
 $database = getenv('DB_DATABASE');
+$disposition = getenv('MIGRAFOLD_CONSUMER_DISPOSITION') ?: 'archive';
 
-if (! in_array($driver, ['mysql', 'mariadb'], true)) {
-    throw new RuntimeException('Database consumer acceptance requires mysql or mariadb.');
+if (! in_array($driver, ['mysql', 'mariadb', 'pgsql'], true)) {
+    throw new RuntimeException('Database consumer acceptance requires mysql, mariadb, or pgsql.');
 }
 
 if (! is_string($database) || ! str_ends_with($database, '_testing')) {
     throw new RuntimeException('Database consumer acceptance requires a dedicated _testing database.');
+}
+
+if (! in_array($disposition, ['archive', 'delete'], true)) {
+    throw new RuntimeException('Database consumer acceptance disposition must be archive or delete.');
 }
 
 $kernel = $app->make(Kernel::class);
@@ -38,6 +43,17 @@ $connection = $databases->connection($driver);
 
 if ($connection->getDriverName() !== $driver || $connection->getDatabaseName() !== $database) {
     throw new RuntimeException('Consumer database connection does not match the requested isolated target.');
+}
+
+$expectedServerMajor = getenv('MIGRAFOLD_EXPECTED_SERVER_MAJOR');
+$serverVersion = $connection->getServerVersion();
+
+if (is_string($expectedServerMajor)
+    && $expectedServerMajor !== ''
+    && ! str_starts_with($serverVersion, $expectedServerMajor.'.')) {
+    throw new RuntimeException(
+        "Consumer database server [{$serverVersion}] does not match expected major [{$expectedServerMajor}].",
+    );
 }
 
 $migrationDirectories = [
@@ -166,13 +182,20 @@ if (array_map('count', $sourceData) !== [
     throw new RuntimeException('Preserved data migrations did not create the expected source data.');
 }
 
-$planOutput = $call('migrafold:plan', [
+$planArguments = [
     '--connection' => $driver,
     '--date' => '2026_09_12',
-    '--archive-id' => 'database-consumer',
     '--json' => true,
     '--no-interaction' => true,
-]);
+];
+
+if ($disposition === 'delete') {
+    $planArguments['--delete'] = true;
+} else {
+    $planArguments['--archive-id'] = 'database-consumer';
+}
+
+$planOutput = $call('migrafold:plan', $planArguments);
 $plan = json_decode($planOutput, true, flags: JSON_THROW_ON_ERROR);
 $planFingerprint = is_array($plan) ? ($plan['plan_fingerprint'] ?? null) : null;
 $planSchema = is_array($plan) ? ($plan['schema'] ?? null) : null;
@@ -186,6 +209,7 @@ if (! is_string($planFingerprint)
     || ($planSchema['driver'] ?? null) !== $driver
     || ($planSchema['tables'] ?? null) !== 24
     || ($planSchema['fingerprint'] ?? null) !== $sourceFingerprint
+    || ($plan['source_disposition'] ?? null) !== $disposition
     || ! is_array($planVerification)
     || ($planVerification['migration_counts'] ?? null) !== [
         'source' => 78,
@@ -226,13 +250,21 @@ foreach ($migrationDirectories as $owner => $directory) {
     }
 }
 
-$call('migrafold:compact', [
+$compactArguments = [
     '--connection' => $driver,
     '--date' => '2026_09_12',
-    '--archive-id' => 'database-consumer',
     '--confirm' => $planFingerprint,
     '--no-interaction' => true,
-]);
+];
+
+if ($disposition === 'delete') {
+    $compactArguments['--delete'] = true;
+    $compactArguments['--confirm-delete'] = $planFingerprint;
+} else {
+    $compactArguments['--archive-id'] = 'database-consumer';
+}
+
+$call('migrafold:compact', $compactArguments);
 
 $activeMigrations = [];
 $archivedMigrations = [];
@@ -240,7 +272,8 @@ $manifestOwners = [];
 
 foreach ($migrationDirectories as $owner => $directory) {
     array_push($activeMigrations, ...$migrationFiles($directory));
-    $archive = $migrationFiles($directory.'/.migrafold-archive/database-consumer');
+    $archiveDirectory = $directory.'/.migrafold-archive/database-consumer';
+    $archive = is_dir($archiveDirectory) ? $migrationFiles($archiveDirectory) : [];
     array_push($archivedMigrations, ...$archive);
     $manifestPath = $directory.'/.migrafold-manifest.json';
     $manifest = is_file($manifestPath)
@@ -265,7 +298,7 @@ $expectedOwners = array_keys($migrationDirectories);
 sort($expectedOwners, SORT_STRING);
 
 if (count($activeMigrations) !== 29
-    || count($archivedMigrations) !== 73
+    || count($archivedMigrations) !== ($disposition === 'archive' ? 73 : 0)
     || $manifestOwners !== $expectedOwners) {
     throw new RuntimeException('Compaction file scope mismatch: '.json_encode([
         'active' => count($activeMigrations),
@@ -358,13 +391,15 @@ $schema->dropAllTables();
 fwrite(STDOUT, json_encode([
     'laravel' => Application::VERSION,
     'driver' => $driver,
+    'database' => $database,
+    'server_version' => $serverVersion,
     'source_migrations' => 78,
     'compacted_migrations' => 73,
     'preserved_migrations' => 5,
     'tables' => 24,
     'baselines' => 24,
     'owners' => array_keys($migrationDirectories),
-    'archive' => true,
+    'disposition' => $disposition,
     'activation' => true,
     'installed_verify' => true,
     'fresh_replay' => true,

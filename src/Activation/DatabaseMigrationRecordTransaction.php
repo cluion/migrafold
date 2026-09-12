@@ -29,6 +29,7 @@ final readonly class DatabaseMigrationRecordTransaction implements MigrationReco
         return match ($connection->getDriverName()) {
             'sqlite' => $this->sqlite($connection, $callback),
             'mysql', 'mariadb' => $this->mysql($connection, $lockName, $callback),
+            'pgsql' => $this->postgres($connection, $lockName, $callback),
             default => throw MigrationRecordActivationFailed::because(
                 "database driver [{$connection->getDriverName()}] does not provide a supported activation lock.",
             ),
@@ -133,6 +134,60 @@ final readonly class DatabaseMigrationRecordTransaction implements MigrationReco
         return $result;
     }
 
+    private function postgres(Connection $connection, string $lockName, Closure $callback): mixed
+    {
+        $name = 'migrafold:'.hash('sha256', $lockName);
+
+        try {
+            $connection->beginTransaction();
+            $this->acquirePostgresLock($connection, $name);
+            $result = $callback();
+            $connection->commit();
+
+            return $result;
+        } catch (Throwable $exception) {
+            if ($connection->transactionLevel() !== 0) {
+                $connection->rollBack();
+            }
+
+            throw $exception;
+        }
+    }
+
+    private function acquirePostgresLock(Connection $connection, string $name): void
+    {
+        if ($this->lockTimeoutSeconds === 0) {
+            $acquired = $connection->selectOne(
+                'SELECT pg_try_advisory_xact_lock(hashtextextended(?, 0)) AS acquired',
+                [$name],
+                false,
+            );
+
+            if (! is_object($acquired) || ! $this->lockResultIsTrue($acquired, 'acquired')) {
+                throw MigrationRecordActivationFailed::because(
+                    'could not acquire the PostgreSQL migration-record advisory lock.',
+                );
+            }
+
+            return;
+        }
+
+        try {
+            $connection->statement("SET LOCAL lock_timeout = '{$this->lockTimeoutSeconds}s'");
+            $connection->selectOne(
+                'SELECT pg_advisory_xact_lock(hashtextextended(?, 0)) AS acquired',
+                [$name],
+                false,
+            );
+            $connection->statement("SET LOCAL lock_timeout = '0'");
+        } catch (Throwable $exception) {
+            throw MigrationRecordActivationFailed::because(
+                'could not acquire the PostgreSQL migration-record advisory lock.',
+                $exception,
+            );
+        }
+    }
+
     private function lockResultIsOne(object $result, string $property): bool
     {
         if (! property_exists($result, $property)) {
@@ -142,5 +197,17 @@ final readonly class DatabaseMigrationRecordTransaction implements MigrationReco
         $value = $result->{$property};
 
         return (is_int($value) || is_string($value)) && (string) $value === '1';
+    }
+
+    private function lockResultIsTrue(object $result, string $property): bool
+    {
+        if (! property_exists($result, $property)) {
+            return false;
+        }
+
+        $value = $result->{$property};
+
+        return $value === true
+            || ((is_int($value) || is_string($value)) && in_array((string) $value, ['1', 't', 'true'], true));
     }
 }

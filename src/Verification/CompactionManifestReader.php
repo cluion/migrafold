@@ -124,7 +124,7 @@ final readonly class CompactionManifestReader
         $schemaFingerprint = $this->fingerprint($schema, 'sha256');
         $verification = $this->object($payload, 'verification');
 
-        if (! in_array($driver, ['sqlite', 'mysql', 'mariadb'], true)
+        if (! in_array($driver, ['sqlite', 'mysql', 'mariadb', 'pgsql'], true)
             || $this->string($verification, 'mode') !== 'same-engine-dual-sandbox'
             || $this->string($verification, 'driver') !== $driver
             || $this->boolean($verification, 'data_state_compared') !== false) {
