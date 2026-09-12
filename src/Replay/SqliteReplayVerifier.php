@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Cluion\Migrafold\Replay;
 
+use Cluion\Migrafold\Analysis\MigrationCatalogAnalyzer;
+use Cluion\Migrafold\Analysis\MigrationCompactionAction;
 use Cluion\Migrafold\Discovery\MigrationCatalog;
 use Cluion\Migrafold\Migration\BaselineMigrationGenerator;
 use Cluion\Migrafold\Migration\GeneratedMigration;
@@ -27,6 +29,7 @@ final readonly class SqliteReplayVerifier
         private BaselineMigrationGenerator $generator = new BaselineMigrationGenerator(),
         private SqliteSchemaInspector $inspector = new SqliteSchemaInspector(),
         private SchemaReplayComparator $comparator = new SchemaReplayComparator(),
+        private MigrationCatalogAnalyzer $analyzer = new MigrationCatalogAnalyzer(),
         private ?string $temporaryRoot = null,
     ) {}
 
@@ -35,13 +38,29 @@ final readonly class SqliteReplayVerifier
         string $date,
         string $migrationTable = 'migrations',
     ): ReplayVerificationResult {
+        $analysis = $this->analyzer->analyze($catalog);
+        $analysis->assertReplayable();
         $sourcePaths = $this->sourcePaths($catalog);
+        $preservedPaths = [];
+
+        foreach ($analysis->forAction(MigrationCompactionAction::Preserve) as $entry) {
+            $path = $sourcePaths[strtolower($entry->migration->name)] ?? null;
+
+            if ($path === null) {
+                throw ReplayVerificationFailed::because(
+                    "preserved migration [{$entry->migration->name}] was not found in replay scope.",
+                );
+            }
+
+            $preservedPaths[] = $path;
+        }
+
         $this->assertMigrationTable($migrationTable);
         [$workspace, $token] = $this->createWorkspace();
 
         try {
             $source = $this->replay(
-                $sourcePaths,
+                [array_values($sourcePaths)],
                 $workspace.'/source.sqlite',
                 $token.'-source',
                 $migrationTable,
@@ -57,7 +76,7 @@ final readonly class SqliteReplayVerifier
 
             $baselinePaths = $this->writeBaselines($workspace, $baselines);
             $baseline = $this->replay(
-                $baselinePaths,
+                [$baselinePaths, $preservedPaths],
                 $workspace.'/baseline.sqlite',
                 $token.'-baseline',
                 $migrationTable,
@@ -68,9 +87,11 @@ final readonly class SqliteReplayVerifier
             $result = new ReplayVerificationResult(
                 source: $source,
                 baseline: $baseline,
+                analysis: $analysis,
                 baselines: $baselines,
                 sourceMigrations: count($sourcePaths),
                 baselineMigrations: count($baselinePaths),
+                preservedMigrations: count($preservedPaths),
             );
         } finally {
             $this->removeWorkspace($workspace, $token);
@@ -80,7 +101,7 @@ final readonly class SqliteReplayVerifier
     }
 
     /**
-     * @return list<string>
+     * @return array<string, string>
      */
     private function sourcePaths(MigrationCatalog $catalog): array
     {
@@ -113,7 +134,7 @@ final readonly class SqliteReplayVerifier
                 );
             }
 
-            $paths[] = $resolved;
+            $paths[strtolower($migration->name)] = $resolved;
         }
 
         return $paths;
@@ -208,10 +229,10 @@ final readonly class SqliteReplayVerifier
     }
 
     /**
-     * @param list<string> $migrationPaths
+     * @param list<list<string>> $migrationGroups
      */
     private function replay(
-        array $migrationPaths,
+        array $migrationGroups,
         string $databasePath,
         string $connectionName,
         string $migrationTable,
@@ -238,21 +259,44 @@ final readonly class SqliteReplayVerifier
             $repository = new DatabaseMigrationRepository($this->databases, $migrationTable);
             $migrator = new Migrator($repository, $this->databases, $this->files);
 
-            /** @var array<string, string> $ran */
+            /** @var list<string> $ran */
             [$ran, $snapshot] = $migrator->usingConnection(
                 $connectionName,
-                function () use ($repository, $migrator, $migrationPaths, $resolved, $migrationTable): array {
+                function () use ($repository, $migrator, $migrationGroups, $resolved, $migrationTable): array {
                     $repository->createRepository();
-                    $ran = $migrator->run($migrationPaths);
+                    $ran = [];
+                    $ranNames = [];
+
+                    foreach ($migrationGroups as $migrationPaths) {
+                        if ($migrationPaths === []) {
+                            continue;
+                        }
+
+                        foreach ($migrator->run($migrationPaths) as $path) {
+                            $name = pathinfo($path, PATHINFO_FILENAME);
+
+                            if (isset($ranNames[strtolower($name)])) {
+                                throw ReplayVerificationFailed::because(
+                                    "sandbox migration [{$name}] appears in more than one replay group.",
+                                );
+                            }
+
+                            $ranNames[strtolower($name)] = true;
+                            $ran[] = $path;
+                        }
+                    }
+
                     $snapshot = $this->inspector->inspect($resolved, [$migrationTable]);
 
                     return [$ran, $snapshot];
                 },
             );
 
-            if (count($ran) !== count($migrationPaths)) {
+            $expectedMigrations = array_sum(array_map('count', $migrationGroups));
+
+            if (count($ran) !== $expectedMigrations) {
                 throw ReplayVerificationFailed::because(
-                    "{$label} sandbox ran ".count($ran).' of '.count($migrationPaths).' migrations.',
+                    "{$label} sandbox ran ".count($ran).' of '.$expectedMigrations.' migrations.',
                 );
             }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cluion\Migrafold\Replay;
 
+use Cluion\Migrafold\Analysis\MigrationAnalysisReport;
 use Cluion\Migrafold\Migration\GeneratedMigration;
 use Cluion\Migrafold\Schema\Definition\SchemaSnapshot;
 
@@ -15,9 +16,11 @@ final readonly class ReplayVerificationResult
     public function __construct(
         public SchemaSnapshot $source,
         public SchemaSnapshot $baseline,
+        public MigrationAnalysisReport $analysis,
         public array $baselines,
         public int $sourceMigrations,
         public int $baselineMigrations,
+        public int $preservedMigrations,
     ) {}
 
     public function fingerprint(): string

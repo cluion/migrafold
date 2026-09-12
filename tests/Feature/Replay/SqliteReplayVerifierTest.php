@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Replay;
 
+use Cluion\Migrafold\Analysis\Exception\MigrationAnalysisFailed;
 use Cluion\Migrafold\Discovery\DiscoveredMigration;
 use Cluion\Migrafold\Discovery\MigrationCatalog;
 use Cluion\Migrafold\Discovery\MigrationOwner;
@@ -16,7 +17,6 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Schema;
-use RuntimeException;
 use Tests\TestCase;
 
 final class SqliteReplayVerifierTest extends TestCase
@@ -43,6 +43,10 @@ final class SqliteReplayVerifierTest extends TestCase
         self::assertSame($result->source->fingerprint(), $result->fingerprint());
         self::assertSame(2, $result->sourceMigrations);
         self::assertSame(1, $result->baselineMigrations);
+        self::assertSame(0, $result->preservedMigrations);
+        self::assertCount(2, $result->analysis->compactable());
+        self::assertSame([], $result->analysis->preserved());
+        self::assertSame([], $result->analysis->blocking());
         self::assertCount(1, $result->baselines);
         self::assertSame('users', $result->baselines[0]->table);
         self::assertSame($defaultConnection, $databases->getDefaultConnection());
@@ -62,12 +66,20 @@ final class SqliteReplayVerifierTest extends TestCase
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        throw new \RuntimeException('fixture replay failure');
+        Schema::create('users', static function (Blueprint $table): void {
+            $table->id();
+        });
+
+        Schema::create('users', static function (Blueprint $table): void {
+            $table->id();
+        });
     }
 
     public function down(): void {}
@@ -83,11 +95,90 @@ PHP,
             self::fail('Source replay unexpectedly succeeded.');
         } catch (ReplayVerificationFailed $exception) {
             self::assertStringContainsString('source sandbox replay raised', $exception->getMessage());
-            self::assertInstanceOf(RuntimeException::class, $exception->getPrevious());
+            self::assertNotNull($exception->getPrevious());
         }
 
         self::assertSame($defaultConnection, $databases->getDefaultConnection());
         self::assertTrue(Schema::hasTable('sentinels'));
+        $this->assertDirectoryIsEmpty($temporaryRoot);
+    }
+
+    public function test_preserved_data_migration_runs_after_the_generated_baseline(): void
+    {
+        $catalog = $this->catalog([
+            '2020_01_01_000000_create_users_table' => $this->createUsersMigration(),
+            '2020_01_02_000000_seed_system_user' => <<<'PHP'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        DB::table('users')->insert([
+            'email' => 'system@example.test',
+        ]);
+    }
+
+    public function down(): void {}
+};
+PHP,
+        ]);
+        $temporaryRoot = $this->migrationDirectory([]);
+        $result = $this->verifier($this->databases(), $temporaryRoot)->verify(
+            $catalog,
+            '2026_09_12',
+        );
+
+        self::assertSame(2, $result->sourceMigrations);
+        self::assertSame(1, $result->baselineMigrations);
+        self::assertSame(1, $result->preservedMigrations);
+        self::assertCount(1, $result->analysis->compactable());
+        self::assertCount(1, $result->analysis->preserved());
+        self::assertSame([], $result->analysis->blocking());
+        self::assertSame($result->source->fingerprint(), $result->baseline->fingerprint());
+        self::assertFalse(Schema::hasTable('users'));
+        $this->assertDirectoryIsEmpty($temporaryRoot);
+    }
+
+    public function test_blocking_catalog_fails_before_replay_workspace_creation(): void
+    {
+        $catalog = $this->catalog([
+            '2020_01_01_000000_dynamic_users_table' => <<<'PHP'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        $tableName = 'users';
+
+        Schema::create($tableName, static function (Blueprint $table): void {
+            $table->id();
+        });
+    }
+
+    public function down(): void {}
+};
+PHP,
+        ]);
+        $temporaryRoot = $this->migrationDirectory([]);
+
+        try {
+            $this->verifier($this->databases(), $temporaryRoot)->verify($catalog, '2026_09_12');
+            self::fail('Blocking migration unexpectedly reached replay.');
+        } catch (MigrationAnalysisFailed $exception) {
+            self::assertStringContainsString('dynamic_users_table:dynamic_schema', $exception->getMessage());
+            self::assertStringContainsString('replay was not started', $exception->getMessage());
+        }
+
+        self::assertFalse(Schema::hasTable('users'));
         $this->assertDirectoryIsEmpty($temporaryRoot);
     }
 
@@ -106,7 +197,7 @@ PHP,
         try {
             $this->verifier($this->databases(), $temporaryRoot)->verify($catalog, '2026_09_12');
             self::fail('Fingerprint drift unexpectedly passed verification.');
-        } catch (ReplayVerificationFailed $exception) {
+        } catch (MigrationAnalysisFailed $exception) {
             self::assertStringContainsString('changed after discovery', $exception->getMessage());
         }
 
