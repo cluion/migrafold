@@ -3,6 +3,7 @@
 /.gitignore export-ignore
 /docs export-ignore
 /phpstan.neon.dist export-ignore
+/phpunit.database.xml.dist export-ignore
 /phpunit.xml.dist export-ignore
 /testbench.yaml export-ignore
 /tests export-ignore
