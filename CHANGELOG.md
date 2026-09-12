@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.1]
+
+### Fixed
+
+- Generate lossless Laravel Blueprint definitions for MariaDB unsigned integer columns that expose their engine-default display widths.
+- Cover unsigned tiny, small, medium, regular, and big integers with real MySQL and MariaDB schema round-trip regression tests.
+
 ## [0.1.0]
 
 ### Added
@@ -30,5 +37,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Keep recoverable source checkpoints until migration-record activation commits.
 - Verify installed baselines, manifests, migration records, and current schema without mutating them.
 
-[Unreleased]: https://github.com/cluion/migrafold/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cluion/migrafold/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/cluion/migrafold/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/cluion/migrafold/releases/tag/v0.1.0
