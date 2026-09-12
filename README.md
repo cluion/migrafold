@@ -30,6 +30,7 @@ The current implementation includes:
 - Deterministic migration discovery for Laravel applications and active Moduark Modules, including explicit table ownership and source fingerprints.
 - Owner-aware output planning with per-owner manifests, global dry-run preflight, and rollback across application and Module directories.
 - Manifest-protected source archival or explicit deletion with fingerprint revalidation and cross-owner rollback.
+- Transactional, lock-protected migration-record activation that replaces only the exact retired scope and preserves unrelated history.
 - Fail-closed detection for schema features that cannot yet be represented safely.
 
 ## Development

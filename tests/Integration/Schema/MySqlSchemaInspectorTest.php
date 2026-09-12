@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Schema;
 
+use Cluion\Migrafold\Activation\DatabaseMigrationRecordTransaction;
 use Cluion\Migrafold\Migration\BaselineMigrationGenerator;
 use Cluion\Migrafold\Migration\GeneratedMigration;
 use Cluion\Migrafold\Schema\Exception\UnsupportedSchemaFeature;
@@ -11,6 +12,7 @@ use Cluion\Migrafold\Schema\MySqlSchemaInspector;
 use Illuminate\Database\MariaDbConnection;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\MySqlConnection;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Facade;
 use PDO;
@@ -160,6 +162,66 @@ final class MySqlSchemaInspectorTest extends TestCase
         self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
     }
 
+    public function test_migration_record_transaction_commits_and_releases_its_lock(): void
+    {
+        $this->createMigrationRepository();
+        $transaction = new DatabaseMigrationRecordTransaction(1);
+
+        $first = $transaction->run(
+            $this->connection,
+            'integration:migrations',
+            function (): string {
+                $this->connection->table('migrations')->insert([
+                    'migration' => '2026_09_12_000001_create_users_baseline',
+                    'batch' => 1,
+                ]);
+
+                return 'committed';
+            },
+        );
+        $second = $transaction->run(
+            $this->connection,
+            'integration:migrations',
+            fn (): int => $this->connection->table('migrations')->count(),
+        );
+
+        self::assertSame('committed', $first);
+        self::assertSame(1, $second);
+        self::assertSame(0, $this->connection->transactionLevel());
+    }
+
+    public function test_migration_record_transaction_rolls_back_and_releases_its_lock(): void
+    {
+        $this->createMigrationRepository();
+        $transaction = new DatabaseMigrationRecordTransaction(1);
+
+        try {
+            $transaction->run(
+                $this->connection,
+                'integration:migrations',
+                function (): void {
+                    $this->connection->table('migrations')->insert([
+                        'migration' => '2026_09_12_000001_create_users_baseline',
+                        'batch' => 1,
+                    ]);
+
+                    throw new RuntimeException('simulated transaction failure');
+                },
+            );
+        } catch (RuntimeException $exception) {
+            self::assertSame('simulated transaction failure', $exception->getMessage());
+        }
+
+        $count = $transaction->run(
+            $this->connection,
+            'integration:migrations',
+            fn (): int => $this->connection->table('migrations')->count(),
+        );
+
+        self::assertSame(0, $count);
+        self::assertSame(0, $this->connection->transactionLevel());
+    }
+
     private function createSupportedSchema(): void
     {
         $this->connection->unprepared(<<<'SQL'
@@ -187,6 +249,15 @@ create table users (
         on update cascade on delete restrict
 ) engine = InnoDB default character set utf8mb4 collate utf8mb4_unicode_ci comment = 'Application users'
 SQL);
+    }
+
+    private function createMigrationRepository(): void
+    {
+        $this->connection->getSchemaBuilder()->create('migrations', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->string('migration');
+            $table->integer('batch');
+        });
     }
 
     public function test_exclusions_are_case_insensitive(): void
