@@ -194,6 +194,26 @@ SQL);
         self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
     }
 
+    public function test_native_mariadb_uuid_columns_round_trip(): void
+    {
+        if ($this->connection->getDriverName() !== 'mariadb') {
+            self::markTestSkipped('Native UUID columns are specific to MariaDB.');
+        }
+
+        $this->connection->statement('create table public_ids (id uuid not null primary key)');
+
+        $inspector = new MySqlSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString("\$table->uuid('id');", $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
     public function test_common_numeric_and_binary_columns_round_trip_on_a_real_server(): void
     {
         $this->connection->statement(<<<'SQL'

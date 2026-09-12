@@ -124,6 +124,7 @@ final class ColumnBlueprintRenderer
             'mediumtext' => 'mediumText',
             'longtext' => 'longText',
             'json' => 'json',
+            'uuid' => 'uuid',
             'date' => 'date',
             'year' => 'year',
         ];

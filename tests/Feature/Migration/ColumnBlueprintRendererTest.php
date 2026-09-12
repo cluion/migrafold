@@ -42,6 +42,7 @@ final class ColumnBlueprintRendererTest extends TestCase
         yield 'medium text' => ['mediumtext', "\$table->mediumText('value');"];
         yield 'long text' => ['longtext', "\$table->longText('value');"];
         yield 'json' => ['json', "\$table->json('value');"];
+        yield 'MariaDB UUID' => ['uuid', "\$table->uuid('value');"];
         yield 'date' => ['date', "\$table->date('value');"];
         yield 'year' => ['year', "\$table->year('value');"];
         yield 'datetime' => ['datetime', "\$table->dateTime('value');"];
