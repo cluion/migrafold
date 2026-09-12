@@ -107,3 +107,5 @@ The default tests use an in-memory SQLite database. Database integration tests s
 The Moduark interoperability tests install isolated matching-major dependency sets for Laravel 12 and 13 with the current stable Moduark 1.x release. Each harness exercises the official registry, resource manifest, and table ownership runtime through baseline publication, source archival, and migration-record activation.
 
 The nWidart interoperability tests install isolated matching-major dependency sets for Laravel 12 with nWidart 12 and Laravel 13 with nWidart 13. Each harness uses its own dedicated SQLite `*_testing` database and exercises official runtime discovery through baseline publication, source archival, and migration-record activation.
+
+Continuous integration runs the core test and static-analysis suite against Laravel 12 on PHP 8.2 and Laravel 13 on PHP 8.3. Separate jobs run both interoperability harnesses across their matching Laravel majors.
