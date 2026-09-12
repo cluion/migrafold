@@ -1,0 +1,46 @@
+{
+    "name": "cluion/migrafold-nwidart-laravel-13-interop",
+    "description": "Isolated nWidart interoperability harness for Migrafold on Laravel 13.",
+    "type": "project",
+    "license": "MIT",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../../..",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "cluion/migrafold": "dev-main",
+        "laravel/framework": "^13.0",
+        "nwidart/laravel-modules": "^13.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^11.0",
+        "phpunit/phpunit": "^12.5 || ^13.0"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "MigrafoldInterop\\Nwidart\\": "../src/"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "wikimedia/composer-merge-plugin": true
+        },
+        "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": [
+                "cluion/migrafold",
+                "nwidart/laravel-modules"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

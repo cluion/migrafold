@@ -2,8 +2,9 @@ parameters:
     level: max
     paths:
         - src
-        - tests
-    excludePaths:
-        analyse:
-            - tests/SafetyHarness/vendor
+        - tests/Feature
+        - tests/Fixtures
+        - tests/Integration
+        - tests/Unit
+        - tests/TestCase.php
     tmpDir: .phpstan

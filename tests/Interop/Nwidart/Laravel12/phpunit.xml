@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="vendor/autoload.php"
+         colors="true"
+         cacheDirectory="../../../../.phpunit.cache/nwidart-laravel-12">
+    <testsuites>
+        <testsuite name="nWidart Laravel 12 interoperability">
+            <directory>../src</directory>
+        </testsuite>
+    </testsuites>
+
+    <php>
+        <env name="APP_ENV" value="testing" force="true"/>
+        <env name="APP_KEY" value="base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="/>
+        <env name="DB_CONNECTION" value="testing" force="true"/>
+        <env name="DB_DATABASE" value="/private/tmp/migrafold_nwidart_laravel12_testing" force="true"/>
+        <env name="DB_URL" value="" force="true"/>
+    </php>
+</phpunit>
