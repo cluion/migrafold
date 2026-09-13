@@ -17,6 +17,12 @@ Supported scope:
 - Archive by default; explicit confirmation for deletion.
 - Manifest-scoped migration-record activation instead of truncating the repository.
 
+## Watch the compaction
+
+[![VS Code showing Laravel, Moduark, and nWidart baseline migrations after compaction](docs/images/compaction-demo.png)](https://github.com/cluion/migrafold/releases/download/v0.2.0/migrafold-v0.2.0-vscode-demo.mp4)
+
+The [v0.2.0 VS Code demo](https://github.com/cluion/migrafold/releases/download/v0.2.0/migrafold-v0.2.0-vscode-demo.mp4) uses a disposable Laravel 13 application with SQLite and migrations owned by the application, Moduark, and nWidart. Its 120 applied migrations become 24 readable baselines plus 5 preserved data migrations. Migrafold archives 115 retired source files, replaces their migration records so the record count changes from 120 to 29, and `migrafold:verify` passes. This is a tested example, not a promise that every migration history can be compacted.
+
 ## Capabilities
 
 Migrafold provides:
