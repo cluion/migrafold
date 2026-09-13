@@ -19,9 +19,11 @@ Supported scope:
 
 ## Watch the compaction
 
-[![VS Code showing Laravel, Moduark, and nWidart baseline migrations after compaction](docs/images/compaction-demo.png)](https://github.com/cluion/migrafold/releases/download/v0.2.0/migrafold-v0.2.0-vscode-demo.mp4)
+![Animated VS Code demo showing Laravel, Moduark, and nWidart migration compaction](docs/images/compaction-demo.gif)
 
-The [v0.2.0 VS Code demo](https://github.com/cluion/migrafold/releases/download/v0.2.0/migrafold-v0.2.0-vscode-demo.mp4) uses a disposable Laravel 13 application with SQLite and migrations owned by the application, Moduark, and nWidart. Its 120 applied migrations become 24 readable baselines plus 5 preserved data migrations. Migrafold archives 115 retired source files, replaces their migration records so the record count changes from 120 to 29, and `migrafold:verify` passes. This is a tested example, not a promise that every migration history can be compacted.
+The animation uses a disposable Laravel 13 application with SQLite and migrations owned by the application, Moduark, and nWidart. Its 120 applied migrations become 24 readable baselines plus 5 preserved data migrations. Migrafold archives 115 retired source files, replaces their migration records so the record count changes from 120 to 29, and `migrafold:verify` passes. This is a tested example, not a promise that every migration history can be compacted.
+
+[Download the full-resolution v0.2.0 MP4 recording](https://github.com/cluion/migrafold/releases/download/v0.2.0/migrafold-v0.2.0-vscode-demo.mp4) or [view a still frame](docs/images/compaction-demo.png).
 
 ## Capabilities
 
