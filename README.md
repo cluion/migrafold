@@ -8,7 +8,7 @@ Migrafold folds Laravel migration history into verified, deploy-safe baseline mi
 
 Migrafold is designed to produce readable, per-table PHP baseline migrations while preserving safety around existing databases, migration records, archived source files, and Module ownership.
 
-The planned first release targets:
+Supported scope:
 
 - PHP 8.2 or newer.
 - Laravel 12 and 13.
@@ -17,9 +17,9 @@ The planned first release targets:
 - Archive by default; explicit confirmation for deletion.
 - Manifest-scoped migration-record activation instead of truncating the repository.
 
-## Current development
+## Capabilities
 
-The current implementation includes:
+Migrafold provides:
 
 - Framework-lifecycle fixtures for Laravel's pending-list, migration-log, existing-table guard, and fail-closed rollback behavior.
 - A read-only SQLite schema inspector for columns, defaults, collations, generated columns, indexes, and foreign keys.
@@ -41,6 +41,16 @@ The current implementation includes:
 - Planner-generated v2 manifests that record the global compacted/preserved migration scope and same-engine replay fingerprints without database credentials or temporary sandbox identities.
 - A read-only `migrafold:verify` command for detecting manifest, migration file, migration record, and current-schema drift after compaction.
 - Fail-closed detection for schema features that cannot yet be represented safely.
+
+## What happens to an existing migration history?
+
+Migrafold generates one readable PHP baseline per final database table, not one file per original migration. For example, if a project has 230 applied migrations, of which 200 are supported schema-only changes and 30 are data-only changes, and its final schema has 45 tables, a successful compaction would leave 45 baselines plus the 30 preserved data migrations active. The 200 schema migrations would be archived by default, and their 200 rows in the `migrations` table would be replaced with 45 baseline rows. Unrelated records remain untouched. These numbers are an illustration, not a promise for every project: unsupported, mixed schema/data, dynamic, or drifted histories fail closed.
+
+Application baselines remain under `database/migrations`; active Moduark and nWidart Module baselines remain in their respective Module migration directories. Each owner also receives a `.migrafold-manifest.json` audit file. Archived sources stay under that owner's `.migrafold-archive/<archive-id>/` directory; data-only migrations stay active. Back up the database and source history and rehearse the complete file-and-record cutover on an isolated copy before considering a production run. MySQL, MariaDB, and PostgreSQL planning require permissions to create and remove isolated replay databases on the selected server.
+
+On an existing database, compaction changes the selected migration records but does not rerun the new baselines or rebuild the business tables. On a fresh database, the application and active Module migration paths must be run to create the final tables before preserved data migrations. The `Schema::hasTable()` guard only skips creation when a table already exists; it is not a substitute for migration-record activation or schema verification. Run `migrafold:verify` after compaction and before treating the result as accepted.
+
+Generated baselines intentionally throw `MGF-ROLLBACK-001` from `down()` rather than dropping a populated table. `migrate:rollback`, `migrate:reset`, and `migrate:refresh` cannot automatically reverse a baseline. `migrate:fresh` wipes the database and then runs active migrations; use it only on disposable databases. Recovering an existing database requires an explicit, backed-up restoration procedure, not simply moving archived PHP files back.
 
 ## Preview a compaction
 

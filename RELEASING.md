@@ -2,15 +2,15 @@
 
 This checklist defines the evidence required for a Migrafold release. Complete it against one exact commit. Do not combine results from different commits, and do not publish from a dirty working tree.
 
-Migrafold uses tag-driven releases. The annotated Git tag is the package version's single source of truth, and `composer.json` must not contain a `version` field. A dedicated version-bump or release commit is not required.
+Migrafold uses tag-driven releases. The annotated Git tag is the package version's single source of truth, and `composer.json` must not contain a `version` field. A dedicated version-bump or release commit is not required. Finalize the changelog version section as part of the last substantive feature or documentation commit before acceptance; do not defer a known documentation mismatch until after tagging.
 
 ## 1. Prepare the candidate
 
 - Confirm `git status --short` is empty.
 - Confirm the intended commit with `git rev-parse HEAD`.
-- Confirm `CHANGELOG.md` already contains the target version and accurate release notes.
+- Confirm `CHANGELOG.md` already contains the target version and accurate release notes in the candidate commit.
 - Confirm the README support matrix and release policy are accurate.
-- If documentation needs correction, commit the substantive documentation change and repeat acceptance against the new commit. Do not create a commit solely to duplicate the version stored in the tag.
+- If documentation needs correction, make the substantive documentation change before tagging and repeat acceptance against the new commit. Do not create a commit solely to duplicate the version stored in the tag.
 
 ## 2. Validate package metadata and source
 
