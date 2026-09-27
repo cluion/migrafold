@@ -54,7 +54,15 @@ final readonly class TableMigrationRenderer
             static fn (string $statement): string => '            '.$statement,
             $statements,
         ));
-        $usesDb = str_contains($body, 'DB::raw(');
+        $postCreateStatements = [
+            ...$this->checkStatements($table, $driver),
+            ...$this->expressionIndexStatements($table, $driver),
+            ...$this->multiKeyExpressionIndexStatements($table, $driver),
+            ...$this->partialIndexStatements($table, $driver),
+            ...$this->ginIndexStatements($table, $driver),
+        ];
+        $postCreate = $postCreateStatements === [] ? '' : implode("\n", $postCreateStatements)."\n";
+        $usesDb = str_contains($body, 'DB::raw(') || $postCreateStatements !== [];
         $dbImport = $usesDb ? "use Illuminate\\Support\\Facades\\DB;\n" : '';
         $tableName = $this->export($table->name);
 
@@ -78,7 +86,7 @@ return new class extends Migration
         Schema::create({$tableName}, function (Blueprint \$table): void {
 {$body}
         });
-    }
+{$postCreate}    }
 
     public function down(): void
     {
@@ -90,6 +98,251 @@ return new class extends Migration
 PHP;
 
         return $contents."\n";
+    }
+
+    /** @return list<string> */
+    private function checkStatements(TableDefinition $table, ?string $driver): array
+    {
+        if ($table->checkConstraints === []) {
+            return [];
+        }
+
+        if ($driver !== 'pgsql' || ($table->schema !== null && $table->schema !== 'public')) {
+            throw UnsupportedMigrationGeneration::forSchema(
+                "CHECK constraints on table [{$table->name}] require the public PostgreSQL schema.",
+            );
+        }
+
+        $tableName = $this->quotePostgresIdentifier($table->name);
+        $names = [];
+        $statements = [];
+
+        foreach ($table->checkConstraints as $check) {
+            $name = $this->quotePostgresIdentifier($check->name);
+
+            if (isset($names[$name])) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "table [{$table->name}] contains duplicate CHECK constraint [{$check->name}].",
+                );
+            }
+
+            $names[$name] = true;
+
+            if (trim($check->expression) === '' || str_contains($check->expression, "\0")) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "CHECK constraint [{$check->name}] has an invalid expression.",
+                );
+            }
+
+            $sql = 'ALTER TABLE "public".'.$tableName.' ADD CONSTRAINT '.$name.' CHECK ('.$check->expression.')';
+            $statements[] = '        DB::statement('.$this->export($sql).');';
+        }
+
+        return $statements;
+    }
+
+    private function quotePostgresIdentifier(string $identifier): string
+    {
+        if ($identifier === '' || str_contains($identifier, "\0")) {
+            throw UnsupportedMigrationGeneration::forSchema('PostgreSQL identifier is empty or invalid.');
+        }
+
+        return '"'.str_replace('"', '""', $identifier).'"';
+    }
+
+    /** @return list<string> */
+    private function expressionIndexStatements(TableDefinition $table, ?string $driver): array
+    {
+        if ($table->expressionIndexes === []) {
+            return [];
+        }
+
+        if ($driver !== 'pgsql' || ($table->schema !== null && $table->schema !== 'public')) {
+            throw UnsupportedMigrationGeneration::forSchema(
+                "expression indexes on table [{$table->name}] require the public PostgreSQL schema.",
+            );
+        }
+
+        $tableName = $this->quotePostgresIdentifier($table->name);
+        $names = array_fill_keys(array_map(static fn (IndexDefinition $index): string => $index->name, $table->indexes), true);
+        $statements = [];
+
+        foreach ($table->expressionIndexes as $index) {
+            $name = $this->quotePostgresIdentifier($index->name);
+
+            if (isset($names[$index->name])) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "table [{$table->name}] contains duplicate index [{$index->name}].",
+                );
+            }
+
+            $names[$index->name] = true;
+
+            if (trim($index->expression) === '' || str_contains($index->expression, "\0")) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "expression index [{$index->name}] has an invalid expression.",
+                );
+            }
+
+            $unique = $index->unique ? 'UNIQUE ' : '';
+            $sql = 'CREATE '.$unique.'INDEX '.$name.' ON "public".'.$tableName.' USING btree ('.$index->expression.')';
+            $statements[] = '        DB::statement('.$this->export($sql).');';
+        }
+
+        return $statements;
+    }
+
+    /** @return list<string> */
+    private function multiKeyExpressionIndexStatements(TableDefinition $table, ?string $driver): array
+    {
+        if ($table->multiKeyExpressionIndexes === []) {
+            return [];
+        }
+
+        if ($driver !== 'pgsql' || ($table->schema !== null && $table->schema !== 'public')) {
+            throw UnsupportedMigrationGeneration::forSchema(
+                "multi-key expression indexes on table [{$table->name}] require the public PostgreSQL schema.",
+            );
+        }
+
+        $tableName = $this->quotePostgresIdentifier($table->name);
+        $names = array_fill_keys([
+            ...array_map(static fn (IndexDefinition $index): string => $index->name, $table->indexes),
+            ...array_column($table->expressionIndexes, 'name'),
+        ], true);
+        $statements = [];
+
+        foreach ($table->multiKeyExpressionIndexes as $index) {
+            $name = $this->quotePostgresIdentifier($index->name);
+
+            if (isset($names[$index->name])) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "table [{$table->name}] contains duplicate index [{$index->name}].",
+                );
+            }
+
+            $names[$index->name] = true;
+
+            if (count($index->keys) < 2) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "multi-key expression index [{$index->name}] requires at least two keys.",
+                );
+            }
+
+            foreach ($index->keys as $key) {
+                if (trim($key) === '' || str_contains($key, "\0")) {
+                    throw UnsupportedMigrationGeneration::forSchema(
+                        "multi-key expression index [{$index->name}] has an invalid key.",
+                    );
+                }
+            }
+
+            $unique = $index->unique ? 'UNIQUE ' : '';
+            $sql = 'CREATE '.$unique.'INDEX '.$name.' ON "public".'.$tableName.' USING btree ('.implode(', ', $index->keys).')';
+            $statements[] = '        DB::statement('.$this->export($sql).');';
+        }
+
+        return $statements;
+    }
+
+    /** @return list<string> */
+    private function partialIndexStatements(TableDefinition $table, ?string $driver): array
+    {
+        if ($table->partialIndexes === []) {
+            return [];
+        }
+
+        if ($driver !== 'pgsql' || ($table->schema !== null && $table->schema !== 'public')) {
+            throw UnsupportedMigrationGeneration::forSchema(
+                "partial indexes on table [{$table->name}] require the public PostgreSQL schema.",
+            );
+        }
+
+        $tableName = $this->quotePostgresIdentifier($table->name);
+        $names = array_fill_keys([
+            ...array_map(static fn (IndexDefinition $index): string => $index->name, $table->indexes),
+            ...array_column($table->expressionIndexes, 'name'),
+            ...array_column($table->multiKeyExpressionIndexes, 'name'),
+        ], true);
+        $statements = [];
+
+        foreach ($table->partialIndexes as $index) {
+            $name = $this->quotePostgresIdentifier($index->name);
+
+            if (isset($names[$index->name])) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "table [{$table->name}] contains duplicate index [{$index->name}].",
+                );
+            }
+
+            $names[$index->name] = true;
+
+            if ($index->keys === [] || trim($index->predicate) === '' || str_contains($index->predicate, "\0")) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "partial index [{$index->name}] has invalid keys or predicate.",
+                );
+            }
+
+            foreach ($index->keys as $key) {
+                if (trim($key) === '' || str_contains($key, "\0")) {
+                    throw UnsupportedMigrationGeneration::forSchema(
+                        "partial index [{$index->name}] has invalid keys or predicate.",
+                    );
+                }
+            }
+
+            $unique = $index->unique ? 'UNIQUE ' : '';
+            $sql = 'CREATE '.$unique.'INDEX '.$name.' ON "public".'.$tableName.' USING btree ('.implode(', ', $index->keys).') WHERE '.$index->predicate;
+            $statements[] = '        DB::statement('.$this->export($sql).');';
+        }
+
+        return $statements;
+    }
+
+    /** @return list<string> */
+    private function ginIndexStatements(TableDefinition $table, ?string $driver): array
+    {
+        if ($table->ginIndexes === []) {
+            return [];
+        }
+
+        if ($driver !== 'pgsql' || ($table->schema !== null && $table->schema !== 'public')) {
+            throw UnsupportedMigrationGeneration::forSchema(
+                "GIN indexes on table [{$table->name}] require the public PostgreSQL schema.",
+            );
+        }
+
+        $tableName = $this->quotePostgresIdentifier($table->name);
+        $names = array_fill_keys([
+            ...array_map(static fn (IndexDefinition $index): string => $index->name, $table->indexes),
+            ...array_column($table->expressionIndexes, 'name'),
+            ...array_column($table->multiKeyExpressionIndexes, 'name'),
+            ...array_column($table->partialIndexes, 'name'),
+        ], true);
+        $statements = [];
+
+        foreach ($table->ginIndexes as $index) {
+            $name = $this->quotePostgresIdentifier($index->name);
+
+            if (isset($names[$index->name])) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "table [{$table->name}] contains duplicate index [{$index->name}].",
+                );
+            }
+
+            $names[$index->name] = true;
+
+            if (trim($index->key) === '' || str_contains($index->key, "\0")) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "GIN index [{$index->name}] has an invalid key.",
+                );
+            }
+
+            $sql = 'CREATE INDEX '.$name.' ON "public".'.$tableName.' USING gin ('.$index->key.')';
+            $statements[] = '        DB::statement('.$this->export($sql).');';
+        }
+
+        return $statements;
     }
 
     private function index(IndexDefinition $index): string
@@ -156,6 +409,11 @@ PHP;
 
         if ($foreignKey->onDelete !== null) {
             $line .= "\n                ->onDelete(".$this->export($foreignKey->onDelete).')';
+        }
+
+        if ($foreignKey->deferrable) {
+            $line .= "\n                ->deferrable()";
+            $line .= "\n                ->initiallyImmediate(".($foreignKey->initiallyDeferred ? 'false' : 'true').')';
         }
 
         return $line.';';

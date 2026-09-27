@@ -31,8 +31,11 @@
         "phpunit/phpunit": "^11.5 || ^12.5 || ^13.0"
     },
     "suggest": {
-        "cluion/moduark": "Enables runtime-backed discovery and table ownership for Moduark Modules.",
+        "cluion/moduark": "Install ^1.3 for runtime-backed discovery and table ownership for Moduark Modules.",
         "nwidart/laravel-modules": "Enables runtime-backed discovery for active nWidart Modules."
+    },
+    "conflict": {
+        "cluion/moduark": "<1.3.0 || >=2.0.0"
     },
     "autoload": {
         "psr-4": {

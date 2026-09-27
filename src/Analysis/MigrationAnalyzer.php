@@ -115,6 +115,7 @@ final readonly class MigrationAnalyzer
         'collation',
         'comment',
         'computed',
+        'constrained',
         'date',
         'dateTime',
         'dateTimeTz',
@@ -240,6 +241,7 @@ final readonly class MigrationAnalyzer
     public function __construct(
         ?Parser $parser = null,
         private NodeFinder $nodes = new NodeFinder(),
+        private ?PostgresLiteralDdlClassifier $postgresDdl = null,
     ) {
         $this->parser = $parser ?? (new ParserFactory())->createForHostVersion();
     }
@@ -277,6 +279,7 @@ final readonly class MigrationAnalyzer
             sourcePath: $migration->source->path,
             classification: $this->classification($signals),
             signals: $signals['signals'],
+            postgresDdlEffects: $signals['postgres_ddl_effects'],
         );
     }
 
@@ -365,7 +368,7 @@ final readonly class MigrationAnalyzer
     }
 
     /**
-     * @return array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>}
+     * @return array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>, postgres_ddl_effects: list<PostgresDdlEffect>}
      */
     private function detectSignals(ClassMethod $method): array
     {
@@ -385,6 +388,7 @@ final readonly class MigrationAnalyzer
             'dynamic' => false,
             'unsupported' => false,
             'signals' => [],
+            'postgres_ddl_effects' => [],
         ];
         $hasControlFlow = false;
 
@@ -449,7 +453,7 @@ final readonly class MigrationAnalyzer
     }
 
     /**
-     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>} $state
+     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>, postgres_ddl_effects: list<PostgresDdlEffect>} $state
      */
     private function detectStaticCall(StaticCall $call, array &$state): void
     {
@@ -485,7 +489,7 @@ final readonly class MigrationAnalyzer
     }
 
     /**
-     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>} $state
+     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>, postgres_ddl_effects: list<PostgresDdlEffect>} $state
      */
     private function detectSchemaCall(StaticCall $call, string $method, array &$state): void
     {
@@ -526,7 +530,7 @@ final readonly class MigrationAnalyzer
     }
 
     /**
-     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>} $state
+     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>, postgres_ddl_effects: list<PostgresDdlEffect>} $state
      */
     private function detectDatabaseCall(StaticCall $call, string $method, array &$state): void
     {
@@ -548,6 +552,20 @@ final readonly class MigrationAnalyzer
             $verb = $this->sqlVerb($sql->value);
 
             if (in_array($verb, ['alter', 'create', 'drop', 'rename', 'truncate'], true)) {
+                $effect = $this->postgresDdl?->classify($sql->value);
+
+                if ($effect !== null) {
+                    $state['postgres_ddl_effects'][] = $effect->withLine($call->getStartLine());
+                    $this->mark(
+                        $state,
+                        'schema',
+                        'schema.postgres_'.$effect->type->value,
+                        $call,
+                    );
+
+                    return;
+                }
+
                 $this->mark($state, 'raw', 'raw.db_'.$method, $call);
             } elseif (in_array($verb, ['delete', 'insert', 'merge', 'replace', 'update'], true)) {
                 $this->mark($state, 'data', 'data.db_'.$method, $call);
@@ -570,7 +588,7 @@ final readonly class MigrationAnalyzer
 
     /**
      * @param array<string, true> $blueprints
-     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>} $state
+     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>, postgres_ddl_effects: list<PostgresDdlEffect>} $state
      */
     private function detectMethodCall(MethodCall $call, array $blueprints, array &$state): void
     {
@@ -673,7 +691,7 @@ final readonly class MigrationAnalyzer
     }
 
     /**
-     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>} $state
+     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>, postgres_ddl_effects: list<PostgresDdlEffect>} $state
      * @param 'schema'|'data'|'raw'|'dynamic'|'unsupported' $kind
      */
     private function mark(array &$state, string $kind, string $signal, Node $node): void
@@ -683,7 +701,7 @@ final readonly class MigrationAnalyzer
     }
 
     /**
-     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>} $signals
+     * @param array{schema: bool, data: bool, raw: bool, dynamic: bool, unsupported: bool, signals: list<string>, postgres_ddl_effects: list<PostgresDdlEffect>} $signals
      */
     private function classification(array $signals): MigrationClassification
     {

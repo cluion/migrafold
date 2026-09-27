@@ -139,11 +139,18 @@ final class ColumnBlueprintRenderer
         }
 
         if ($driver === 'pgsql') {
+            if ($type === 'tsvector' && ($column->generation === null || $column->generation->type !== 'stored')) {
+                throw UnsupportedMigrationGeneration::forSchema(
+                    "PostgreSQL tsvector column [{$column->name}] must be a stored generated column.",
+                );
+            }
+
             $postgres = [
                 'boolean' => 'boolean',
                 'bytea' => 'binary',
                 'double precision' => 'double',
                 'jsonb' => 'jsonb',
+                'tsvector' => 'tsvector',
             ];
 
             if (isset($postgres[$type])) {

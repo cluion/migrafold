@@ -99,11 +99,13 @@ final class PostgresSchemaInspectorTest extends TestCase
             $snapshot->fingerprint(),
         );
         self::assertContains('named_foreign_keys', $snapshot->capabilities->supported);
+        self::assertContains('check_constraints', $snapshot->capabilities->unsupported);
         self::assertContains('partial_indexes', $snapshot->capabilities->unsupported);
         self::assertContains('identity_columns', $snapshot->capabilities->unsupported);
 
         $users = $snapshot->tables[1];
 
+        self::assertArrayNotHasKey('check_constraints', $users->toArray());
         self::assertNull($users->schema);
         self::assertNull($users->engine);
         self::assertSame('Application users', $users->comment);
@@ -164,6 +166,327 @@ final class PostgresSchemaInspectorTest extends TestCase
         foreach ($generated as $migration) {
             $this->runMigration($migration);
         }
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_deferrable_foreign_keys_round_trip(): void
+    {
+        $this->connection->statement(<<<'SQL'
+create table outbox_replay_envelopes (
+    scope_key varchar(64) not null,
+    message_key varchar(128) not null,
+    parent_message_key varchar(128),
+    fallback_message_key varchar(128),
+    constraint outbox_replay_envelopes_identity unique (scope_key, message_key),
+    constraint outbox_replay_envelopes_fallback_fk
+        foreign key (scope_key, fallback_message_key)
+        references outbox_replay_envelopes (scope_key, message_key)
+        deferrable initially immediate,
+    constraint outbox_replay_envelopes_parent_fk
+        foreign key (scope_key, parent_message_key)
+        references outbox_replay_envelopes (scope_key, message_key)
+        deferrable initially deferred
+)
+SQL);
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $foreignKeys = $source->tables[0]->foreignKeys;
+
+        self::assertSame(
+            ['outbox_replay_envelopes_fallback_fk', 'outbox_replay_envelopes_parent_fk'],
+            array_column($foreignKeys, 'name'),
+        );
+        self::assertTrue($foreignKeys[0]->deferrable);
+        self::assertFalse($foreignKeys[0]->initiallyDeferred);
+        self::assertTrue($foreignKeys[1]->deferrable);
+        self::assertTrue($foreignKeys[1]->initiallyDeferred);
+        self::assertContains('deferrable_foreign_keys', $source->capabilities->supported);
+
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+        self::assertCount(1, $generated);
+        self::assertStringContainsString('->deferrable()', $generated[0]->contents);
+        self::assertStringContainsString('->initiallyImmediate(true)', $generated[0]->contents);
+        self::assertStringContainsString('->initiallyImmediate(false)', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_named_check_constraints_are_canonical_and_round_trip(): void
+    {
+        $this->connection->statement(<<<'SQL'
+create table scores (
+    id bigserial primary key,
+    score integer not null,
+    state varchar(16),
+    constraint scores_positive check (score >= 0),
+    constraint scores_state check (state ~ '^[a-z]+$')
+)
+SQL);
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $checks = $source->tables[0]->checkConstraints;
+
+        self::assertSame(['scores_positive', 'scores_state'], array_column($checks, 'name'));
+        self::assertContains('check_constraints', $source->capabilities->supported);
+        self::assertNotContains('check_constraints', $source->capabilities->unsupported);
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+        self::assertCount(1, $generated);
+        self::assertStringContainsString('use Illuminate\\Support\\Facades\\DB;', $generated[0]->contents);
+        self::assertStringContainsString('ALTER TABLE "public"."scores" ADD CONSTRAINT "scores_positive" CHECK', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_check_constraints_with_in_lists_and_associative_boolean_groups_round_trip(): void
+    {
+        $this->connection->statement(<<<'SQL'
+create table workflow_events (
+    status varchar(16) not null,
+    attempt_count integer not null,
+    source_version integer not null,
+    constraint workflow_events_status check (status in ('pending', 'completed')),
+    constraint workflow_events_counters check ((attempt_count >= 0 and attempt_count <= 5) and source_version > 0)
+)
+SQL);
+        $this->connection->statement(<<<'SQL'
+create unique index workflow_events_pending_unique
+    on workflow_events (status)
+    where status in ('pending', 'completed')
+SQL);
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_quoted_check_and_table_names_round_trip(): void
+    {
+        $this->connection->statement('create table "Odd""Scores" (id bigint primary key, constraint "score""range" check (id >= 0))');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        self::assertSame('Odd"Scores', $source->tables[0]->name);
+        self::assertSame('score"range', $source->tables[0]->checkConstraints[0]->name);
+
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+        self::assertStringContainsString('ALTER TABLE "public"."Odd""Scores" ADD CONSTRAINT "score""range"', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_single_key_expression_indexes_round_trip(): void
+    {
+        $this->connection->statement('create table users (email varchar(255))');
+        $this->connection->statement('create unique index users_email_ci on users (lower(email))');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+
+        self::assertSame([], $source->tables[0]->indexes);
+        self::assertSame('users_email_ci', $source->tables[0]->expressionIndexes[0]->name);
+        self::assertTrue($source->tables[0]->expressionIndexes[0]->unique);
+        self::assertContains('expression_indexes', $source->capabilities->supported);
+
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+        self::assertStringContainsString('CREATE UNIQUE INDEX "users_email_ci" ON "public"."users" USING btree (lower((email)::text))', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_quoted_expression_index_and_table_names_round_trip(): void
+    {
+        $this->connection->statement('create table "Odd""Users" (email text)');
+        $this->connection->statement('create index "lower""email" on "Odd""Users" (lower(email))');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString('CREATE INDEX "lower""email" ON "public"."Odd""Users" USING btree', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_mixed_key_expression_indexes_round_trip(): void
+    {
+        $this->connection->statement('create table product_releases (product_id bigint, version text)');
+        $this->connection->statement('create unique index product_releases_version_ci on product_releases (product_id, lower(version))');
+        $this->connection->statement('create index product_releases_search on product_releases (lower(version), product_id)');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $indexes = $source->tables[0]->multiKeyExpressionIndexes;
+
+        self::assertSame([], $source->tables[0]->indexes);
+        self::assertSame(['product_releases_search', 'product_releases_version_ci'], array_column($indexes, 'name'));
+        self::assertSame(['product_id', 'lower(version)'], $indexes[1]->keys);
+        self::assertFalse($indexes[0]->unique);
+        self::assertTrue($indexes[1]->unique);
+        self::assertContains('expression_indexes', $source->capabilities->supported);
+
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+        self::assertStringContainsString('CREATE UNIQUE INDEX "product_releases_version_ci" ON "public"."product_releases" USING btree (product_id, lower(version))', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_quoted_mixed_key_expression_index_and_table_names_round_trip(): void
+    {
+        $this->connection->statement('create table "Odd""Releases" (id bigint, "Odd""Version" text)');
+        $this->connection->statement('create index "version""ci" on "Odd""Releases" (id, lower("Odd""Version"))');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString('CREATE INDEX "version""ci" ON "public"."Odd""Releases" USING btree', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_multi_column_unique_and_single_column_partial_indexes_round_trip(): void
+    {
+        $this->connection->statement('create table reports (reporter_id bigint, target_type text, target_id bigint, status text, resolved_at timestamp(0))');
+        $this->connection->statement("create unique index reports_active_unique on reports (reporter_id, target_type, target_id) where status in ('submitted', 'reviewing')");
+        $this->connection->statement('create index reports_open_index on reports (resolved_at) where resolved_at is null');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $indexes = $source->tables[0]->partialIndexes;
+
+        self::assertSame([], $source->tables[0]->indexes);
+        self::assertSame(['reports_active_unique', 'reports_open_index'], array_column($indexes, 'name'));
+        self::assertSame(['reporter_id', 'target_type', 'target_id'], $indexes[0]->keys);
+        self::assertTrue($indexes[0]->unique);
+        self::assertFalse($indexes[1]->unique);
+        self::assertContains('partial_indexes', $source->capabilities->supported);
+
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+        self::assertStringContainsString('CREATE UNIQUE INDEX "reports_active_unique" ON "public"."reports" USING btree (reporter_id, target_type, target_id) WHERE', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_quoted_partial_index_and_table_names_round_trip(): void
+    {
+        $this->connection->statement('create table "Odd""Reports" ("Odd""State" text, email text)');
+        $this->connection->statement('create index "open""reports" on "Odd""Reports" (email) where "Odd""State" is null');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString('CREATE INDEX "open""reports" ON "public"."Odd""Reports" USING btree', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_single_column_gin_index_round_trips(): void
+    {
+        $this->connection->statement('create table documents (payload jsonb)');
+        $this->connection->statement('create index documents_payload_gin on documents using gin (payload)');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+
+        self::assertSame([], $source->tables[0]->indexes);
+        self::assertSame('documents_payload_gin', $source->tables[0]->ginIndexes[0]->name);
+        self::assertSame('payload', $source->tables[0]->ginIndexes[0]->key);
+        self::assertContains('gin_indexes', $source->capabilities->supported);
+
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+        self::assertStringContainsString('CREATE INDEX "documents_payload_gin" ON "public"."documents" USING gin (payload)', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_quoted_gin_index_table_and_column_names_round_trip(): void
+    {
+        $this->connection->statement('create table "Odd""Docs" ("Odd""Payload" jsonb)');
+        $this->connection->statement('create index "payload""gin" on "Odd""Docs" using gin ("Odd""Payload")');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+
+        self::assertStringContainsString('CREATE INDEX "payload""gin" ON "public"."Odd""Docs" USING gin ("Odd""Payload")', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
+
+        self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
+    }
+
+    public function test_generated_tsvector_column_and_gin_index_round_trip(): void
+    {
+        $this->connection->statement(<<<'SQL'
+create table search_documents (
+    title text,
+    body text,
+    search_vector tsvector generated always as (
+        setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
+        setweight(to_tsvector('simple', coalesce(body, '')), 'B')
+    ) stored
+)
+SQL);
+        $this->connection->statement('create index search_documents_vector_gin on search_documents using gin (search_vector)');
+
+        $inspector = new PostgresSchemaInspector();
+        $source = $inspector->inspect($this->connection);
+        $searchVector = $source->tables[0]->columns[2];
+
+        self::assertSame('tsvector', $searchVector->type);
+        self::assertSame('stored', $searchVector->generation?->type);
+        self::assertNotEmpty($searchVector->generation->expression);
+        self::assertContains('tsvector_columns', $source->capabilities->supported);
+        self::assertContains('gin_indexes', $source->capabilities->supported);
+
+        $generated = (new BaselineMigrationGenerator())->generate($source, '2026_09_12');
+        self::assertStringContainsString("\$table->tsvector('search_vector')->nullable()->storedAs(", $generated[0]->contents);
+        self::assertStringContainsString('CREATE INDEX "search_documents_vector_gin" ON "public"."search_documents" USING gin (search_vector)', $generated[0]->contents);
+
+        $this->resetDatabase();
+        $this->runMigration($generated[0]);
 
         self::assertSame($source->toJson(), $inspector->inspect($this->connection)->toJson());
     }
@@ -337,9 +660,20 @@ create function touch_event() returns trigger language plpgsql as $$ begin retur
 create trigger touch_event before update on events for each row execute function touch_event()
 SQL,
         ];
-        yield 'check constraint' => [
-            'check_constraint',
-            'create table scores (id bigint, score integer constraint scores_positive check (score >= 0))',
+        yield 'unvalidated check constraint' => [
+            'unvalidated_constraint',
+            'create table scores (score integer); alter table scores add constraint scores_positive check (score >= 0) not valid',
+        ];
+        yield 'no inherit check constraint' => [
+            'inherited_check_constraint',
+            'create table scores (score integer, constraint scores_positive check (score >= 0) no inherit)',
+        ];
+        yield 'check depending on custom function' => [
+            'check_constraint_dependency',
+            <<<'SQL'
+create function is_positive(value integer) returns boolean language sql immutable as $$ select value >= 0 $$;
+create table scores (score integer, constraint scores_positive check (is_positive(score)))
+SQL,
         ];
         yield 'partition' => [
             'partition',
@@ -377,13 +711,37 @@ SQL,
             'standalone_sequence',
             'create sequence event_numbers; create table events (id bigint)',
         ];
-        yield 'partial index' => [
+        yield 'partial expression index' => [
             'partial_index',
-            'create table users (email varchar(255), deleted_at timestamp); create index active_users_email on users (email) where deleted_at is null',
+            'create table users (email varchar(255), deleted_at timestamp); create index active_users_email on users (lower(email)) where deleted_at is null',
         ];
-        yield 'expression index' => [
+        yield 'partial index depending on custom function' => [
+            'partial_index',
+            <<<'SQL'
+create function is_active(value text) returns boolean language sql immutable as $$ select value = 'active' $$;
+create table users (email text, status text);
+create index active_users_email on users (email) where is_active(status)
+SQL,
+        ];
+        yield 'partial multi-key expression index' => [
+            'partial_index',
+            'create table users (email varchar(255), name text); create index users_lower_email on users (lower(email), name) where name is not null',
+        ];
+        yield 'expression index depending on custom function' => [
             'expression_index',
-            'create table users (email varchar(255)); create index users_lower_email on users (lower(email))',
+            <<<'SQL'
+create function canonical_email(value text) returns text language sql immutable as $$ select lower(value) $$;
+create table users (email text);
+create index users_canonical_email on users (canonical_email(email))
+SQL,
+        ];
+        yield 'multi-key expression index depending on custom function' => [
+            'expression_index',
+            <<<'SQL'
+create function canonical_email(value text) returns text language sql immutable as $$ select lower(value) $$;
+create table users (id bigint, email text);
+create index users_canonical_email on users (id, canonical_email(email))
+SQL,
         ];
         yield 'included index columns' => [
             'included_index_columns',
@@ -401,6 +759,26 @@ SQL,
             'index_operator_class',
             'create table users (email text); create index users_email_pattern on users (email text_pattern_ops)',
         ];
+        yield 'non-default GIN operator class' => [
+            'index_operator_class',
+            'create table documents (payload jsonb); create index documents_payload_gin on documents using gin (payload jsonb_path_ops)',
+        ];
+        yield 'GIN expression index' => [
+            'gin_index',
+            "create table documents (title text); create index documents_title_gin on documents using gin (to_tsvector('english', title))",
+        ];
+        yield 'partial GIN index' => [
+            'gin_index',
+            'create table documents (payload jsonb, enabled boolean); create index documents_payload_gin on documents using gin (payload) where enabled',
+        ];
+        yield 'multi-column GIN index' => [
+            'gin_index',
+            'create table documents (payload jsonb, metadata jsonb); create index documents_payload_gin on documents using gin (payload, metadata)',
+        ];
+        yield 'GIN index storage options' => [
+            'index_storage_options',
+            'create table documents (payload jsonb); create index documents_payload_gin on documents using gin (payload) with (fastupdate = off)',
+        ];
         yield 'non-btree index' => [
             'non_btree_index',
             'create table events (external_id bigint); create index events_external_id_hash on events using hash (external_id)',
@@ -416,6 +794,20 @@ SQL,
         yield 'unsupported column type' => [
             'column_type',
             'create table servers (address inet)',
+        ];
+        yield 'plain tsvector column' => [
+            'tsvector_column',
+            'create table search_documents (search_vector tsvector)',
+        ];
+        yield 'generated tsvector depending on custom function' => [
+            'tsvector_column',
+            <<<'SQL'
+create function custom_vector(value text) returns tsvector language sql immutable as $$ select to_tsvector('simple', value) $$;
+create table search_documents (
+    title text,
+    search_vector tsvector generated always as (custom_vector(title)) stored
+)
+SQL,
         ];
     }
 

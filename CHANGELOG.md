@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-27
+
+### Added
+
+- Inspect and render validated, table-local PostgreSQL CHECK constraints as canonical, named baseline operations while keeping raw-SQL source migrations blocked.
+- Inspect and render single-key PostgreSQL btree expression indexes, including unique and quoted names, while rejecting externally dependent variants.
+- Inspect and render multi-key PostgreSQL btree expression indexes, including mixed column/expression keys and unique indexes, without changing existing single-key snapshot output.
+- Inspect and render column-key PostgreSQL btree partial indexes with canonical predicates, including multi-column unique indexes, while rejecting partial expression indexes and custom dependencies.
+- Inspect and render single-column PostgreSQL GIN indexes with default operator classes, while rejecting partial, expression, multi-column, and tuned-storage variants.
+- Inspect and render PostgreSQL stored generated `tsvector` columns with native Laravel Blueprint syntax and catalog dependency validation.
+- Inspect and render validated PostgreSQL deferrable foreign keys while preserving `INITIALLY IMMEDIATE` and `INITIALLY DEFERRED` semantics.
+- Classify only single-statement, literal PostgreSQL `ADD ... CHECK` and `CREATE INDEX` effects, and require every accepted named object to exist in the source replay snapshot before compaction.
+
+### Fixed
+
+- Declare Moduark `^1.3` as the supported optional integration range and report a missing `ResourceManifest` service explicitly.
+- Recognize Laravel's `constrained()` foreign-key definition as a schema-only migration operation.
+- Canonicalize PostgreSQL `ANY(ARRAY[...])` casts and associative boolean grouping so equivalent CHECK constraints and partial-index predicates keep identical fingerprints after replay.
+
 ## [0.2.0] - 2026-09-13
 
 ### Added
@@ -65,7 +84,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Keep recoverable source checkpoints until migration-record activation commits.
 - Verify installed baselines, manifests, migration records, and current schema without mutating them.
 
-[Unreleased]: https://github.com/cluion/migrafold/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cluion/migrafold/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cluion/migrafold/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cluion/migrafold/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/cluion/migrafold/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/cluion/migrafold/compare/v0.1.0...v0.1.1

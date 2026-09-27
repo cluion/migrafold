@@ -191,6 +191,56 @@ final class PostgresReplayVerifierTest extends TestCase
         self::assertSame([], $this->sandboxDatabases());
     }
 
+    public function test_literal_ddl_effect_must_exist_in_the_source_snapshot(): void
+    {
+        $root = $this->root('postgres-uncovered-ddl');
+        $directory = $root.'/database/migrations';
+        $this->write($directory.'/2020_01_01_000000_create_then_drop_ephemeral_table.php', <<<'PHP'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('ephemeral', static function (Blueprint $table): void {
+            $table->id();
+        });
+        DB::statement('ALTER TABLE ephemeral ADD CONSTRAINT ephemeral_id_check CHECK (id > 0)');
+        Schema::dropIfExists('ephemeral');
+    }
+
+    public function down(): void {}
+};
+PHP);
+        $catalog = (new MigrationDiscoverer())->discover([
+            new LaravelMigrationSourceAdapter($root),
+        ]);
+        $temporaryRoot = $this->root('uncovered-artifacts');
+
+        try {
+            (new PostgresReplayVerifier(
+                $this->databases,
+                new Filesystem(),
+                $this->connection,
+                temporaryRoot: $temporaryRoot,
+            ))->verify($catalog, '2026_09_12');
+            self::fail('Uncovered PostgreSQL literal DDL unexpectedly passed replay.');
+        } catch (ReplayVerificationFailed $exception) {
+            self::assertStringContainsString(
+                'add_check_constraint public.ephemeral.ephemeral_id_check',
+                $exception->getMessage(),
+            );
+        }
+
+        self::assertSame([], $this->sandboxDatabases());
+        $this->assertDirectoryIsEmpty($temporaryRoot);
+    }
+
     public function test_sandbox_creation_is_refused_inside_a_source_transaction(): void
     {
         $this->connection->beginTransaction();
@@ -215,6 +265,7 @@ final class PostgresReplayVerifierTest extends TestCase
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -225,6 +276,9 @@ return new class extends Migration
             $table->id();
             $table->string('email')->unique();
         });
+
+        DB::statement("ALTER TABLE users ADD CONSTRAINT users_email_present CHECK (email <> '')");
+        DB::statement('CREATE UNIQUE INDEX users_email_ci ON users (lower(email))');
     }
 
     public function down(): void {}

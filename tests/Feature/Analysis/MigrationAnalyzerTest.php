@@ -8,6 +8,8 @@ use Cluion\Migrafold\Analysis\Exception\MigrationAnalysisFailed;
 use Cluion\Migrafold\Analysis\MigrationAnalyzer;
 use Cluion\Migrafold\Analysis\MigrationClassification;
 use Cluion\Migrafold\Analysis\MigrationCompactionAction;
+use Cluion\Migrafold\Analysis\PostgresDdlEffectType;
+use Cluion\Migrafold\Analysis\PostgresLiteralDdlClassifier;
 use Cluion\Migrafold\Discovery\DiscoveredMigration;
 use Cluion\Migrafold\Output\SourceMigration;
 use PHPUnit\Framework\TestCase;
@@ -54,6 +56,20 @@ PHP);
         $this->assertSignal($analysis->signals, 'schema.table@');
     }
 
+    public function test_constrained_foreign_id_is_schema_only(): void
+    {
+        $analysis = $this->analyze(<<<'PHP'
+Schema::create('passkeys', static function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+});
+PHP);
+
+        self::assertSame(MigrationClassification::SchemaOnly, $analysis->classification);
+        self::assertSame(MigrationCompactionAction::Compact, $analysis->action());
+        $this->assertSignal($analysis->signals, 'schema.blueprint_constrained@');
+    }
+
     public function test_query_builder_writes_are_preserved_as_data_only(): void
     {
         $analysis = $this->analyze(<<<'PHP'
@@ -88,6 +104,36 @@ PHP);
 
         self::assertSame(MigrationClassification::RawSchema, $analysis->classification);
         self::assertSame(MigrationCompactionAction::Block, $analysis->action());
+        $this->assertSignal($analysis->signals, 'raw.db_statement@');
+    }
+
+    public function test_postgres_mode_accepts_covered_literal_check_and_index_effects(): void
+    {
+        $analysis = $this->analyze(<<<'PHP'
+DB::statement("ALTER TABLE users ADD CONSTRAINT users_state_check CHECK (state IN ('active', 'blocked'))");
+DB::statement('CREATE UNIQUE INDEX users_email_ci ON users (lower(email))');
+PHP, postgres: true);
+
+        self::assertSame(MigrationClassification::SchemaOnly, $analysis->classification);
+        self::assertSame(MigrationCompactionAction::Compact, $analysis->action());
+        self::assertSame(
+            [PostgresDdlEffectType::AddCheckConstraint, PostgresDdlEffectType::CreateIndex],
+            array_column($analysis->postgresDdlEffects, 'type'),
+        );
+        $this->assertSignal($analysis->signals, 'schema.postgres_add_check_constraint@');
+        $this->assertSignal($analysis->signals, 'schema.postgres_create_index@');
+    }
+
+    public function test_postgres_mode_keeps_multi_statement_and_unmodeled_ddl_blocked(): void
+    {
+        $analysis = $this->analyze(<<<'PHP'
+DB::statement('ALTER TABLE users ADD CONSTRAINT users_id_check CHECK (id > 0); DROP TABLE users');
+DB::statement('ALTER TABLE users ALTER COLUMN email DROP NOT NULL');
+PHP, postgres: true);
+
+        self::assertSame(MigrationClassification::RawSchema, $analysis->classification);
+        self::assertSame(MigrationCompactionAction::Block, $analysis->action());
+        self::assertSame([], $analysis->postgresDdlEffects);
         $this->assertSignal($analysis->signals, 'raw.db_statement@');
     }
 
@@ -178,9 +224,14 @@ PHP);
         (new MigrationAnalyzer())->analyze($migration);
     }
 
-    private function analyze(string $body): \Cluion\Migrafold\Analysis\MigrationAnalysis
+    private function analyze(
+        string $body,
+        bool $postgres = false,
+    ): \Cluion\Migrafold\Analysis\MigrationAnalysis
     {
-        return (new MigrationAnalyzer())->analyze($this->migration($body));
+        return (new MigrationAnalyzer(
+            postgresDdl: $postgres ? new PostgresLiteralDdlClassifier() : null,
+        ))->analyze($this->migration($body));
     }
 
     private function migration(string $body): DiscoveredMigration

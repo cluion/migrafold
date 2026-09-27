@@ -6,7 +6,14 @@ namespace Cluion\Migrafold\Schema;
 
 use Cluion\Migrafold\Contracts\SchemaInspector;
 use Cluion\Migrafold\Schema\Definition\CapabilityReport;
+use Cluion\Migrafold\Schema\Definition\CheckConstraintDefinition;
 use Cluion\Migrafold\Schema\Definition\ColumnDefinition;
+use Cluion\Migrafold\Schema\Definition\ExpressionIndexDefinition;
+use Cluion\Migrafold\Schema\Definition\ForeignKeyDefinition;
+use Cluion\Migrafold\Schema\Definition\GinIndexDefinition;
+use Cluion\Migrafold\Schema\Definition\IndexDefinition;
+use Cluion\Migrafold\Schema\Definition\MultiKeyExpressionIndexDefinition;
+use Cluion\Migrafold\Schema\Definition\PartialIndexDefinition;
 use Cluion\Migrafold\Schema\Definition\SchemaSnapshot;
 use Cluion\Migrafold\Schema\Definition\TableDefinition;
 use Cluion\Migrafold\Schema\Exception\UnsupportedDatabaseDriver;
@@ -44,11 +51,19 @@ final class PostgresSchemaInspector implements SchemaInspector
             throw $this->unsupported('search_path', implode(',', $searchPath));
         }
 
-        $this->assertNoUnsupportedObjects($connection, $schema);
+        $specialIndexes = $this->assertNoUnsupportedObjects($connection, $schema);
+        $hasTsvectorColumns = $this->assertSupportedTsvectorColumns($connection);
+        $checkConstraints = $this->checkConstraints($connection);
+        $foreignKeyModes = $this->foreignKeyModes($connection);
 
         $excluded = array_fill_keys(array_map('strtolower', $excludedTables), true);
         $mapper = new LaravelSchemaMetadataMapper('PostgreSQL');
         $tables = [];
+        $hasChecks = false;
+        $hasExpressionIndexes = false;
+        $hasPartialIndexes = false;
+        $hasGinIndexes = false;
+        $hasDeferrableForeignKeys = false;
 
         foreach ($schema->getTables(self::SCHEMA) as $metadata) {
             $name = $this->string($metadata, 'name');
@@ -63,7 +78,31 @@ final class PostgresSchemaInspector implements SchemaInspector
                 self::SCHEMA.'.'.$name,
                 self::SCHEMA,
             );
-            $tables[] = $this->normalizeTable($connection, $table);
+            $checks = $checkConstraints[$name] ?? [];
+            $expressionIndexes = $specialIndexes['expression'][$name] ?? [];
+            $multiKeyExpressionIndexes = $specialIndexes['multi_expression'][$name] ?? [];
+            $partialIndexes = $specialIndexes['partial'][$name] ?? [];
+            $ginIndexes = $specialIndexes['gin'][$name] ?? [];
+            $tableForeignKeyModes = $foreignKeyModes[$name] ?? [];
+            $hasChecks = $hasChecks || $checks !== [];
+            $hasExpressionIndexes = $hasExpressionIndexes || $expressionIndexes !== [] || $multiKeyExpressionIndexes !== [];
+            $hasPartialIndexes = $hasPartialIndexes || $partialIndexes !== [];
+            $hasGinIndexes = $hasGinIndexes || $ginIndexes !== [];
+
+            foreach ($tableForeignKeyModes as $mode) {
+                $hasDeferrableForeignKeys = $hasDeferrableForeignKeys || $mode['deferrable'];
+            }
+
+            $tables[] = $this->normalizeTable(
+                $connection,
+                $table,
+                $checks,
+                $expressionIndexes,
+                $multiKeyExpressionIndexes,
+                $partialIndexes,
+                $ginIndexes,
+                $tableForeignKeyModes,
+            );
         }
 
         usort(
@@ -76,29 +115,37 @@ final class PostgresSchemaInspector implements SchemaInspector
             driver: 'pgsql',
             capabilities: new CapabilityReport(
                 supported: [
+                    ...($hasChecks ? ['check_constraints'] : []),
                     'column_collation',
                     'column_comments',
                     'column_defaults',
                     'columns',
+                    ...($hasDeferrableForeignKeys ? ['deferrable_foreign_keys'] : []),
+                    ...($hasExpressionIndexes ? ['expression_indexes'] : []),
                     'foreign_key_actions',
                     'foreign_keys',
                     'generated_columns',
+                    ...($hasGinIndexes ? ['gin_indexes'] : []),
                     'indexes',
                     'named_foreign_keys',
+                    ...($hasPartialIndexes ? ['partial_indexes'] : []),
                     'primary_keys',
                     'table_comments',
+                    ...($hasTsvectorColumns ? ['tsvector_columns'] : []),
                     'unique_indexes',
                 ],
                 unsupported: [
                     'array_columns',
-                    'check_constraints',
+                    ...($hasChecks ? [] : ['check_constraints']),
                     'column_default_expressions',
                     'column_types',
                     'cross_schema_foreign_keys',
                     'custom_types',
-                    'deferrable_constraints',
+                    ...($hasDeferrableForeignKeys
+                        ? ['deferrable_primary_or_unique_constraints']
+                        : ['deferrable_constraints']),
                     'exclusion_constraints',
-                    'expression_indexes',
+                    ...($hasExpressionIndexes ? [] : ['expression_indexes']),
                     'identity_columns',
                     'included_index_columns',
                     'index_operator_classes',
@@ -108,7 +155,7 @@ final class PostgresSchemaInspector implements SchemaInspector
                     'materialized_views',
                     'multi_schema_objects',
                     'non_btree_indexes',
-                    'partial_indexes',
+                    ...($hasPartialIndexes ? [] : ['partial_indexes']),
                     'partitions',
                     'row_level_security',
                     'standalone_sequences',
@@ -123,7 +170,8 @@ final class PostgresSchemaInspector implements SchemaInspector
         );
     }
 
-    private function assertNoUnsupportedObjects(PostgresConnection $connection, PostgresBuilder $schema): void
+    /** @return array{expression: array<string, list<ExpressionIndexDefinition>>, multi_expression: array<string, list<MultiKeyExpressionIndexDefinition>>, partial: array<string, list<PartialIndexDefinition>>, gin: array<string, list<GinIndexDefinition>>} */
+    private function assertNoUnsupportedObjects(PostgresConnection $connection, PostgresBuilder $schema): array
     {
         $views = $schema->getViews(self::SCHEMA);
 
@@ -180,15 +228,6 @@ where n.nspname = 'public' and not t.tgisinternal
 order by c.relname, t.tgname
 limit 1
 SQL,
-            'check_constraint' => <<<'SQL'
-select n.nspname || '.' || c.relname || '.' || k.conname as identity
-from pg_constraint k
-join pg_class c on c.oid = k.conrelid
-join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public' and k.contype = 'c'
-order by c.relname, k.conname
-limit 1
-SQL,
             'partition' => <<<'SQL'
 select n.nspname || '.' || c.relname as identity
 from pg_class c
@@ -241,7 +280,7 @@ select n.nspname || '.' || c.relname || '.' || k.conname as identity
 from pg_constraint k
 join pg_class c on c.oid = k.conrelid
 join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = 'public' and k.contype in ('p', 'u', 'f') and k.condeferrable
+where n.nspname = 'public' and k.contype in ('p', 'u') and k.condeferrable
 order by c.relname, k.conname
 limit 1
 SQL,
@@ -290,15 +329,30 @@ SQL,
             }
         }
 
-        $this->assertSupportedIndexes($connection);
+        return $this->assertSupportedIndexes($connection);
     }
 
-    private function assertSupportedIndexes(PostgresConnection $connection): void
+    /** @return array{expression: array<string, list<ExpressionIndexDefinition>>, multi_expression: array<string, list<MultiKeyExpressionIndexDefinition>>, partial: array<string, list<PartialIndexDefinition>>, gin: array<string, list<GinIndexDefinition>>} */
+    private function assertSupportedIndexes(PostgresConnection $connection): array
     {
         $indexes = $connection->select(<<<'SQL'
 select
     tn.nspname || '.' || tc.relname || '.' || ic.relname as identity,
+    tc.relname as table_name,
+    ic.relname as index_name,
+    pg_get_indexdef(i.indexrelid, 1, false) as expression_key,
+    to_json(array(
+        select pg_get_indexdef(i.indexrelid, key_number.position, false)
+        from generate_series(1, i.indnkeyatts) as key_number(position)
+    ))::text as keys_json,
+    pg_get_expr(i.indpred, i.indrelid, false) as predicate,
+    i.indisunique as is_unique,
+    i.indisprimary as is_primary,
+    i.indnkeyatts as key_count,
     am.amname as access_method,
+    ic.reloptions is not null as custom_storage_options,
+    ic.reltablespace <> 0 as custom_tablespace,
+    not i.indisready or not i.indislive as incomplete,
     i.indpred is not null as partial,
     i.indexprs is not null as expression,
     i.indnkeyatts <> i.indnatts as includes_columns,
@@ -314,7 +368,23 @@ select
         from unnest(i.indclass::oid[]) as classes(opclass_oid)
         join pg_opclass opclass on opclass.oid = classes.opclass_oid
         where not opclass.opcdefault
-    ) as custom_operator_class
+    ) as custom_operator_class,
+    exists (
+        select 1
+        from pg_depend d
+        left join pg_proc p on d.refclassid = 'pg_proc'::regclass and p.oid = d.refobjid
+        left join pg_operator o on d.refclassid = 'pg_operator'::regclass and o.oid = d.refobjid
+        left join pg_collation x on d.refclassid = 'pg_collation'::regclass and x.oid = d.refobjid
+        left join pg_type t on d.refclassid = 'pg_type'::regclass and t.oid = d.refobjid
+        where d.classid = 'pg_class'::regclass
+          and d.objid = i.indexrelid
+          and (
+              (p.oid is not null and p.pronamespace <> 'pg_catalog'::regnamespace)
+              or (o.oid is not null and o.oprnamespace <> 'pg_catalog'::regnamespace)
+              or (x.oid is not null and x.collnamespace <> 'pg_catalog'::regnamespace)
+              or (t.oid is not null and t.typnamespace <> 'pg_catalog'::regnamespace)
+          )
+    ) as external_dependency
 from pg_index i
 join pg_class tc on tc.oid = i.indrelid
 join pg_namespace tn on tn.oid = tc.relnamespace
@@ -324,29 +394,288 @@ where tn.nspname = 'public'
 order by tc.relname, ic.relname
 SQL);
 
+        $expressionIndexes = [];
+        $multiKeyExpressionIndexes = [];
+        $partialIndexes = [];
+        $ginIndexes = [];
+
         foreach ($indexes as $index) {
             $metadata = array_change_key_case((array) $index, CASE_LOWER);
             $identity = $this->string($metadata, 'identity');
             $feature = match (true) {
                 $this->boolean($metadata, 'invalid') => 'invalid_index',
-                $this->boolean($metadata, 'partial') => 'partial_index',
-                $this->boolean($metadata, 'expression') => 'expression_index',
+                $this->boolean($metadata, 'incomplete') => 'invalid_index',
+                $this->boolean($metadata, 'custom_storage_options') => 'index_storage_options',
+                $this->boolean($metadata, 'custom_tablespace') => 'index_tablespace',
                 $this->boolean($metadata, 'includes_columns') => 'included_index_columns',
                 $this->boolean($metadata, 'nulls_not_distinct') => 'index_nulls_not_distinct',
                 $this->boolean($metadata, 'custom_ordering') => 'index_ordering',
                 $this->boolean($metadata, 'custom_operator_class') => 'index_operator_class',
-                strtolower($this->string($metadata, 'access_method')) !== 'btree' => 'non_btree_index',
+                strtolower($this->string($metadata, 'access_method')) === 'gin' && (
+                    $this->boolean($metadata, 'partial')
+                    || $this->boolean($metadata, 'expression')
+                    || $this->nonNegativeInteger($metadata, 'key_count') !== 1
+                    || $this->boolean($metadata, 'is_unique')
+                    || $this->boolean($metadata, 'is_primary')
+                    || $this->boolean($metadata, 'external_dependency')
+                ) => 'gin_index',
+                ! in_array(strtolower($this->string($metadata, 'access_method')), ['btree', 'gin'], true) => 'non_btree_index',
+                $this->boolean($metadata, 'partial') && (
+                    $this->boolean($metadata, 'expression')
+                    || $this->nonNegativeInteger($metadata, 'key_count') < 1
+                    || $this->boolean($metadata, 'is_primary')
+                    || $this->boolean($metadata, 'external_dependency')
+                ) => 'partial_index',
+                $this->boolean($metadata, 'expression') && (
+                    $this->nonNegativeInteger($metadata, 'key_count') < 1
+                    || $this->boolean($metadata, 'is_primary')
+                    || $this->boolean($metadata, 'external_dependency')
+                ) => 'expression_index',
                 default => null,
             };
 
             if ($feature !== null) {
                 throw $this->unsupported($feature, $identity);
             }
+
+            if (strtolower($this->string($metadata, 'access_method')) === 'gin') {
+                $ginIndexes[$this->string($metadata, 'table_name')][] = new GinIndexDefinition(
+                    name: $this->string($metadata, 'index_name'),
+                    key: $this->string($metadata, 'expression_key'),
+                );
+            } elseif ($this->boolean($metadata, 'partial')) {
+                $partialIndexes[$this->string($metadata, 'table_name')][] = new PartialIndexDefinition(
+                    name: $this->string($metadata, 'index_name'),
+                    keys: $this->indexKeys($metadata, $identity, 'partial_index'),
+                    predicate: $this->string($metadata, 'predicate'),
+                    unique: $this->boolean($metadata, 'is_unique'),
+                );
+            } elseif ($this->boolean($metadata, 'expression')) {
+                if ($this->nonNegativeInteger($metadata, 'key_count') === 1) {
+                    $expressionIndexes[$this->string($metadata, 'table_name')][] = new ExpressionIndexDefinition(
+                        name: $this->string($metadata, 'index_name'),
+                        expression: $this->string($metadata, 'expression_key'),
+                        unique: $this->boolean($metadata, 'is_unique'),
+                    );
+                } else {
+                    $multiKeyExpressionIndexes[$this->string($metadata, 'table_name')][] = new MultiKeyExpressionIndexDefinition(
+                        name: $this->string($metadata, 'index_name'),
+                        keys: $this->indexKeys($metadata, $identity, 'expression_index'),
+                        unique: $this->boolean($metadata, 'is_unique'),
+                    );
+                }
+            }
         }
+
+        return ['expression' => $expressionIndexes, 'multi_expression' => $multiKeyExpressionIndexes, 'partial' => $partialIndexes, 'gin' => $ginIndexes];
     }
 
-    private function normalizeTable(PostgresConnection $connection, TableDefinition $table): TableDefinition
+    /**
+     * @param array<array-key, mixed> $metadata
+     * @return list<string>
+     */
+    private function indexKeys(array $metadata, string $identity, string $feature): array
     {
+        $decodedKeys = json_decode($this->string($metadata, 'keys_json'), true, 512, JSON_THROW_ON_ERROR);
+        $keys = [];
+
+        if (! is_array($decodedKeys) || ! array_is_list($decodedKeys)) {
+            throw $this->unsupported($feature, $identity);
+        }
+
+        foreach ($decodedKeys as $key) {
+            if (! is_string($key) || trim($key) === '' || str_contains($key, "\0")) {
+                throw $this->unsupported($feature, $identity);
+            }
+
+            $keys[] = $key;
+        }
+
+        if ($keys === [] || count($keys) !== $this->nonNegativeInteger($metadata, 'key_count')) {
+            throw $this->unsupported($feature, $identity);
+        }
+
+        return $keys;
+    }
+
+    private function assertSupportedTsvectorColumns(PostgresConnection $connection): bool
+    {
+        $rows = $connection->select(<<<'SQL'
+select
+    c.relname as table_name,
+    a.attname as column_name,
+    a.attgenerated as generation_type,
+    pg_get_expr(ad.adbin, ad.adrelid, false) as generation_expression,
+    exists (
+        select 1
+        from pg_depend d
+        left join pg_proc p on d.refclassid = 'pg_proc'::regclass and p.oid = d.refobjid
+        left join pg_operator o on d.refclassid = 'pg_operator'::regclass and o.oid = d.refobjid
+        left join pg_collation x on d.refclassid = 'pg_collation'::regclass and x.oid = d.refobjid
+        left join pg_type t on d.refclassid = 'pg_type'::regclass and t.oid = d.refobjid
+        left join pg_ts_config cfg on d.refclassid = 'pg_ts_config'::regclass and cfg.oid = d.refobjid
+        where d.classid = 'pg_attrdef'::regclass
+          and d.objid = ad.oid
+          and (
+              (p.oid is not null and p.pronamespace <> 'pg_catalog'::regnamespace)
+              or (o.oid is not null and o.oprnamespace <> 'pg_catalog'::regnamespace)
+              or (x.oid is not null and x.collnamespace <> 'pg_catalog'::regnamespace)
+              or (t.oid is not null and t.typnamespace <> 'pg_catalog'::regnamespace)
+              or (cfg.oid is not null and cfg.cfgnamespace <> 'pg_catalog'::regnamespace)
+          )
+    ) as external_dependency
+from pg_attribute a
+join pg_class c on c.oid = a.attrelid
+join pg_namespace n on n.oid = c.relnamespace
+left join pg_attrdef ad on ad.adrelid = a.attrelid and ad.adnum = a.attnum
+where n.nspname = 'public'
+  and c.relkind in ('r', 'p')
+  and a.attnum > 0
+  and not a.attisdropped
+  and a.atttypid = 'pg_catalog.tsvector'::regtype
+order by c.relname, a.attnum
+SQL);
+
+        foreach ($rows as $row) {
+            $metadata = array_change_key_case((array) $row, CASE_LOWER);
+            $identity = $this->string($metadata, 'table_name').'.'.$this->string($metadata, 'column_name');
+
+            $generationType = $metadata['generation_type'] ?? null;
+
+            if (! is_string($generationType) || $generationType !== 's') {
+                throw $this->unsupported('tsvector_column', $identity);
+            }
+
+            $expression = $this->string($metadata, 'generation_expression');
+
+            if (str_contains($expression, "\0") || $this->boolean($metadata, 'external_dependency')) {
+                throw $this->unsupported('tsvector_column', $identity);
+            }
+        }
+
+        return $rows !== [];
+    }
+
+    /** @return array<string, list<CheckConstraintDefinition>> */
+    private function checkConstraints(PostgresConnection $connection): array
+    {
+        $rows = $connection->select(<<<'SQL'
+select
+    c.relname as table_name,
+    k.conname as name,
+    pg_get_expr(k.conbin, k.conrelid, false) as expression,
+    k.convalidated as validated,
+    k.connoinherit as no_inherit,
+    k.coninhcount as inherited,
+    exists (
+        select 1
+        from pg_depend d
+        left join pg_proc p on d.refclassid = 'pg_proc'::regclass and p.oid = d.refobjid
+        left join pg_operator o on d.refclassid = 'pg_operator'::regclass and o.oid = d.refobjid
+        left join pg_collation x on d.refclassid = 'pg_collation'::regclass and x.oid = d.refobjid
+        left join pg_type t on d.refclassid = 'pg_type'::regclass and t.oid = d.refobjid
+        where d.classid = 'pg_constraint'::regclass
+          and d.objid = k.oid
+          and (
+              (p.oid is not null and p.pronamespace <> 'pg_catalog'::regnamespace)
+              or (o.oid is not null and o.oprnamespace <> 'pg_catalog'::regnamespace)
+              or (x.oid is not null and x.collnamespace <> 'pg_catalog'::regnamespace)
+              or (t.oid is not null and t.typnamespace <> 'pg_catalog'::regnamespace)
+          )
+    ) as external_dependency
+from pg_constraint k
+join pg_class c on c.oid = k.conrelid
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public' and k.contype = 'c'
+order by c.relname, k.conname
+SQL);
+
+        $checks = [];
+
+        foreach ($rows as $row) {
+            $metadata = array_change_key_case((array) $row, CASE_LOWER);
+            $table = $this->string($metadata, 'table_name');
+            $name = $this->string($metadata, 'name');
+            $identity = self::SCHEMA.'.'.$table.'.'.$name;
+
+            if (! $this->boolean($metadata, 'validated')) {
+                throw $this->unsupported('unvalidated_constraint', $identity);
+            }
+
+            if ($this->boolean($metadata, 'no_inherit') || $this->nonNegativeInteger($metadata, 'inherited') !== 0) {
+                throw $this->unsupported('inherited_check_constraint', $identity);
+            }
+
+            if ($this->boolean($metadata, 'external_dependency')) {
+                throw $this->unsupported('check_constraint_dependency', $identity);
+            }
+
+            $checks[$table][] = new CheckConstraintDefinition(
+                name: $name,
+                expression: $this->string($metadata, 'expression'),
+            );
+        }
+
+        return $checks;
+    }
+
+    /** @return array<string, array<string, array{deferrable: bool, initially_deferred: bool}>> */
+    private function foreignKeyModes(PostgresConnection $connection): array
+    {
+        $rows = $connection->select(<<<'SQL'
+select
+    c.relname as table_name,
+    k.conname as name,
+    k.condeferrable as deferrable,
+    k.condeferred as initially_deferred
+from pg_constraint k
+join pg_class c on c.oid = k.conrelid
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public' and k.contype = 'f'
+order by c.relname, k.conname
+SQL);
+
+        $modes = [];
+
+        foreach ($rows as $row) {
+            $metadata = array_change_key_case((array) $row, CASE_LOWER);
+            $table = $this->string($metadata, 'table_name');
+            $name = $this->string($metadata, 'name');
+            $deferrable = $this->boolean($metadata, 'deferrable');
+            $initiallyDeferred = $this->boolean($metadata, 'initially_deferred');
+
+            if ($initiallyDeferred && ! $deferrable) {
+                throw $this->unsupported(
+                    'foreign_key_deferrability',
+                    self::SCHEMA.'.'.$table.'.'.$name,
+                );
+            }
+
+            $modes[$table][$name] = [
+                'deferrable' => $deferrable,
+                'initially_deferred' => $initiallyDeferred,
+            ];
+        }
+
+        return $modes;
+    }
+
+    /**
+     * @param list<CheckConstraintDefinition> $checks
+     * @param list<ExpressionIndexDefinition> $expressionIndexes
+     * @param list<MultiKeyExpressionIndexDefinition> $multiKeyExpressionIndexes
+     * @param list<PartialIndexDefinition> $partialIndexes
+     * @param list<GinIndexDefinition> $ginIndexes
+     * @param array<string, array{deferrable: bool, initially_deferred: bool}> $foreignKeyModes
+     */
+    private function normalizeTable(PostgresConnection $connection, TableDefinition $table, array $checks, array $expressionIndexes, array $multiKeyExpressionIndexes, array $partialIndexes, array $ginIndexes, array $foreignKeyModes): TableDefinition
+    {
+        $specialIndexNames = array_fill_keys([
+            ...array_column($expressionIndexes, 'name'),
+            ...array_column($multiKeyExpressionIndexes, 'name'),
+            ...array_column($partialIndexes, 'name'),
+            ...array_column($ginIndexes, 'name'),
+        ], true);
         $columns = array_map(
             fn (ColumnDefinition $column): ColumnDefinition => $this->normalizeColumn($connection, $table, $column),
             $table->columns,
@@ -368,9 +697,59 @@ SQL);
             engine: $table->engine,
             comment: $table->comment,
             columns: $columns,
-            indexes: $table->indexes,
-            foreignKeys: $table->foreignKeys,
+            indexes: array_values(array_filter(
+                $table->indexes,
+                static fn (IndexDefinition $index): bool => ! isset($specialIndexNames[$index->name]),
+            )),
+            foreignKeys: $this->normalizeForeignKeys($table, $foreignKeyModes),
+            checkConstraints: $checks,
+            expressionIndexes: $expressionIndexes,
+            partialIndexes: $partialIndexes,
+            multiKeyExpressionIndexes: $multiKeyExpressionIndexes,
+            ginIndexes: $ginIndexes,
         );
+    }
+
+    /**
+     * @param array<string, array{deferrable: bool, initially_deferred: bool}> $modes
+     * @return list<ForeignKeyDefinition>
+     */
+    private function normalizeForeignKeys(TableDefinition $table, array $modes): array
+    {
+        $foreignKeys = [];
+
+        foreach ($table->foreignKeys as $foreignKey) {
+            $name = $foreignKey->name;
+
+            if ($name === null || ! isset($modes[$name])) {
+                throw new UnexpectedValueException(
+                    'PostgreSQL foreign key metadata is incomplete for ['
+                    .$table->name.'.'.($name ?? 'unnamed').'].',
+                );
+            }
+
+            $mode = $modes[$name];
+            unset($modes[$name]);
+            $foreignKeys[] = new ForeignKeyDefinition(
+                name: $foreignKey->name,
+                columns: $foreignKey->columns,
+                foreignSchema: $foreignKey->foreignSchema,
+                foreignTable: $foreignKey->foreignTable,
+                foreignColumns: $foreignKey->foreignColumns,
+                onUpdate: $foreignKey->onUpdate,
+                onDelete: $foreignKey->onDelete,
+                deferrable: $mode['deferrable'],
+                initiallyDeferred: $mode['initially_deferred'],
+            );
+        }
+
+        if ($modes !== []) {
+            throw new UnexpectedValueException(
+                "PostgreSQL foreign key metadata contains an unmapped constraint for [{$table->name}].",
+            );
+        }
+
+        return $foreignKeys;
     }
 
     private function normalizeColumn(
@@ -437,6 +816,7 @@ SQL);
             'real',
             'smallint',
             'text',
+            'tsvector',
             'uuid',
             'bytea',
         ];
@@ -554,5 +934,21 @@ SQL);
         }
 
         throw new UnexpectedValueException("PostgreSQL metadata [{$key}] must be boolean-compatible.");
+    }
+
+    /** @param array<array-key, mixed> $metadata */
+    private function nonNegativeInteger(array $metadata, string $key): int
+    {
+        $value = $metadata[$key] ?? null;
+
+        if (is_int($value) && $value >= 0) {
+            return $value;
+        }
+
+        if (is_string($value) && ctype_digit($value)) {
+            return (int) $value;
+        }
+
+        throw new UnexpectedValueException("PostgreSQL metadata [{$key}] must be a non-negative integer.");
     }
 }

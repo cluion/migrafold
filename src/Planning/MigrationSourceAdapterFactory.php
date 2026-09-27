@@ -34,6 +34,16 @@ final readonly class MigrationSourceAdapterFactory
 
         if ($available !== []) {
             if (count($available) !== count($bindings)) {
+                if (
+                    $container->bound(self::MODUARK_REGISTRY)
+                    && $container->bound(self::MODUARK_TABLES)
+                    && ! $container->bound(self::MODUARK_RESOURCES)
+                ) {
+                    throw MigrationDiscoveryFailed::because(
+                        'Moduark ResourceManifest is missing; Migrafold requires cluion/moduark ^1.3 for Module discovery. If ^1.3 is installed, check that its service provider is registered.',
+                    );
+                }
+
                 throw MigrationDiscoveryFailed::because(
                     'Moduark runtime integration is partially bound; registry, resources, and table ownership are all required.',
                 );

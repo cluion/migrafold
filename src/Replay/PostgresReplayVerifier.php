@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Cluion\Migrafold\Replay;
 
 use Cluion\Migrafold\Analysis\MigrationCatalogAnalyzer;
+use Cluion\Migrafold\Analysis\MigrationAnalyzer;
+use Cluion\Migrafold\Analysis\PostgresLiteralDdlClassifier;
 use Cluion\Migrafold\Discovery\MigrationCatalog;
 use Cluion\Migrafold\Migration\BaselineMigrationGenerator;
 use Cluion\Migrafold\Migration\GeneratedMigration;
@@ -19,6 +21,8 @@ final readonly class PostgresReplayVerifier implements MigrationReplayVerifier
 {
     private const WORKSPACE_PREFIX = 'migrafold-postgres-replay-';
 
+    private MigrationCatalogAnalyzer $analyzer;
+
     public function __construct(
         private DatabaseManager $databases,
         private Filesystem $files,
@@ -26,10 +30,15 @@ final readonly class PostgresReplayVerifier implements MigrationReplayVerifier
         private BaselineMigrationGenerator $generator = new BaselineMigrationGenerator(),
         private PostgresSchemaInspector $inspector = new PostgresSchemaInspector(),
         private SchemaReplayComparator $comparator = new SchemaReplayComparator(),
-        private MigrationCatalogAnalyzer $analyzer = new MigrationCatalogAnalyzer(),
+        ?MigrationCatalogAnalyzer $analyzer = null,
         private BaselineMigrationOrdering $ordering = new BaselineMigrationOrdering(),
+        private PostgresDdlCoverageValidator $ddlCoverage = new PostgresDdlCoverageValidator(),
         private ?string $temporaryRoot = null,
-    ) {}
+    ) {
+        $this->analyzer = $analyzer ?? new MigrationCatalogAnalyzer(
+            new MigrationAnalyzer(postgresDdl: new PostgresLiteralDdlClassifier()),
+        );
+    }
 
     public function verify(
         MigrationCatalog $catalog,
@@ -55,6 +64,7 @@ final readonly class PostgresReplayVerifier implements MigrationReplayVerifier
                 $this->inspector,
                 'source',
             );
+            $this->ddlCoverage->assertCovered($migrations->analysis, $source);
             $baselines = $this->generator->generate($source, $date);
 
             if ($baselines === []) {

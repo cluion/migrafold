@@ -236,6 +236,19 @@ final class CompactionPlannerTest extends TestCase
         (new MigrationSourceAdapterFactory())->forApplication($root, $container);
     }
 
+    public function test_adapter_factory_reports_missing_moduark_resource_manifest(): void
+    {
+        $root = $this->root();
+        $container = new Container();
+        $container->instance('Cluion\\Moduark\\Registry\\ModuleRegistry', new \stdClass());
+        $container->instance('Cluion\\Moduark\\Persistence\\TableOwnershipIndex', new \stdClass());
+
+        $this->expectException(MigrationDiscoveryFailed::class);
+        $this->expectExceptionMessage('requires cluion/moduark ^1.3');
+
+        (new MigrationSourceAdapterFactory())->forApplication($root, $container);
+    }
+
     public function test_adapter_factory_adds_nwidart_runtime_with_configured_ownership(): void
     {
         $root = $this->root();

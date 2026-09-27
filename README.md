@@ -13,7 +13,7 @@ Supported scope:
 - PHP 8.2 or newer.
 - Laravel 12 and 13.
 - SQLite, MySQL, MariaDB, and PostgreSQL with same-engine verification.
-- Plain Laravel, Moduark, and nWidart Module discovery.
+- Plain Laravel and active nWidart Module discovery; Moduark Module discovery requires `cluion/moduark:^1.3`.
 - Archive by default; explicit confirmation for deletion.
 - Manifest-scoped migration-record activation instead of truncating the repository.
 
@@ -113,7 +113,7 @@ Use `--connection=<name>` to select a database connection or `--json` for machin
 
 The current database driver and schema fingerprint must still match the manifest. Migrations added after compaction are reported as untracked; schema changes made by them are reported as drift. Only currently active Laravel, Moduark, and nWidart owners are discovered, so manifests belonging exclusively to inactive Modules are outside the command's verified scope.
 
-When all three Moduark runtime services are available, active Module migration directories and table ownership are included automatically. A partial Moduark runtime fails closed instead of silently producing an incomplete plan.
+With `cluion/moduark:^1.3`, active Module migration directories and table ownership are included automatically. Moduark v1.0.1 lacks the `ResourceManifest` service required by Migrafold; versions below `^1.3` are unsupported. A missing or partially registered runtime fails closed instead of silently producing an incomplete plan.
 
 When `nwidart/laravel-modules` is active, Migrafold uses its repository's enabled Module list and configured migration generator path. Because nWidart does not expose authoritative table ownership, configure every Module table explicitly:
 
@@ -143,7 +143,9 @@ Migrafold renders the inspected physical schema rather than trying to recover th
 - Enum, set, blob, fixed binary, and variable binary columns.
 - Nullable values, raw defaults, collations, comments, and virtual or stored generated expressions where the database exposes them.
 
-Types or modifiers without a lossless Blueprint representation stop generation with `MGF-GENERATE-001`. Examples include bit fields, precision-bearing SQLite numeric declarations, ambiguous SQLite `real` columns, nonstandard blob sizes, and spatial columns. Existing inspector-level safety checks still reject schema features such as triggers, check constraints, expression indexes, and partial or prefix indexes before rendering.
+Types or modifiers without a lossless Blueprint representation stop generation with `MGF-GENERATE-001`. Examples include bit fields, precision-bearing SQLite numeric declarations, ambiguous SQLite `real` columns, nonstandard blob sizes, and spatial columns. PostgreSQL's validated, table-local CHECK constraints, btree expression indexes (including mixed column/expression keys), column-key btree partial indexes, single-column default-operator-class GIN indexes, stored generated `tsvector` columns, and validated deferrable foreign keys can be inspected and rendered; foreign-key timing preserves `INITIALLY IMMEDIATE` or `INITIALLY DEFERRED`, and equivalent PostgreSQL deparser forms are canonicalized before fingerprinting so replay does not drift on array casts or associative boolean grouping. This does not make raw-SQL source migrations automatically compactable. Plain `tsvector` columns and generated expressions with non-catalog dependencies are rejected. Inspector-level checks still reject unsupported features such as triggers, partial expression indexes, MySQL prefix indexes, externally dependent expression indexes, other non-btree index forms, deferrable primary or unique constraints, unvalidated foreign keys, and CHECK variants that cannot be represented safely.
+
+On PostgreSQL, the analyzer recognizes only a narrow subset of literal raw DDL: one `ALTER TABLE ... ADD CONSTRAINT ... CHECK` statement or one `CREATE [UNIQUE] INDEX` statement targeting the unqualified or `public` schema. A recognized statement becomes compactable only when same-engine source replay confirms that its named constraint or index exists in the inspected snapshot and the inspector can render it losslessly. Comments, dollar-quoted text, multiple statements, dynamic SQL, other schemas, DML, and all other raw DDL remain blocked.
 
 ## Development
 
@@ -161,7 +163,7 @@ The default tests use an in-memory SQLite database. Database integration tests s
 
 Consumer acceptance exports the current Git commit, installs a non-symlinked package copy into isolated Laravel 12 and 13 applications, and verifies automatic package discovery, planning, archive and delete compaction, exact migration-record activation, fresh baseline replay, and installed-state verification before and after replay. The real-database harness runs MySQL, MariaDB, PostgreSQL 16, and PostgreSQL 17; PostgreSQL archive and delete flows are both exercised. Verification must leave baseline and manifest fingerprints and migration records unchanged. Development-only files and local uncommitted changes are excluded from the package under test.
 
-The Moduark interoperability tests install isolated matching-major dependency sets for Laravel 12 and 13 with the current stable Moduark 1.x release. Each harness exercises the official registry, resource manifest, and table ownership runtime through baseline publication, source archival, and migration-record activation.
+The Moduark interoperability tests install isolated matching-major dependency sets for Laravel 12 and 13 with Moduark `^1.3`. Each harness exercises the official registry, resource manifest, and table ownership runtime through baseline publication, source archival, and migration-record activation.
 
 The nWidart interoperability tests install isolated matching-major dependency sets for Laravel 12 with nWidart 12 and Laravel 13 with nWidart 13. Each harness uses its own dedicated SQLite `*_testing` database and exercises official runtime discovery through baseline publication, source archival, and migration-record activation.
 
