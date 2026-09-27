@@ -134,7 +134,7 @@ final class PostgresReplayVerifierTest extends TestCase
 
         self::assertSame('pgsql', $result->source->driver);
         self::assertSame($result->source->toJson(), $result->baseline->toJson());
-        self::assertSame(6, $result->sourceMigrations);
+        self::assertSame(7, $result->sourceMigrations);
         self::assertSame(1, $result->baselineMigrations);
         self::assertSame(1, $result->preservedMigrations);
         self::assertSame($defaultConnection, $this->databases->getDefaultConnection());
@@ -157,6 +157,7 @@ final class PostgresReplayVerifierTest extends TestCase
             '2020_01_03_000000_prepare_users_email_constraint',
             '2020_01_04_000000_validate_users_email_constraint',
             '2020_01_05_000000_cut_over_users_email_constraint',
+            '2020_01_06_000000_allow_null_user_nicknames',
         ], $plan->activation->retiredNames());
         self::assertSame(
             ['2030_01_01_000000_seed_system_user'],
@@ -299,7 +300,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', static function (Blueprint $table): void {
-            $table->string('nickname')->nullable();
+            $table->string('nickname');
         });
     }
 
@@ -354,6 +355,22 @@ return new class extends Migration
         DB::statement(
             'ALTER TABLE users RENAME CONSTRAINT users_email_present_next TO users_email_present',
         );
+    }
+
+    public function down(): void {}
+};
+PHP);
+        $this->write($directory.'/2020_01_06_000000_allow_null_user_nicknames.php', <<<'PHP'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        DB::statement('ALTER TABLE users ALTER COLUMN nickname DROP NOT NULL');
     }
 
     public function down(): void {}

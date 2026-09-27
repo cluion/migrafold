@@ -78,6 +78,13 @@ final class PostgresDdlCoverageValidator
             return in_array($effect->object, $this->indexNames($table), true);
         }
 
+        if (in_array($effect->type, [
+            PostgresDdlEffectType::DropColumnNotNull,
+            PostgresDdlEffectType::SetColumnNotNull,
+        ], true)) {
+            return $this->matchesFinalNullability($table, $effects, $position, $effect);
+        }
+
         if ($effect->type === PostgresDdlEffectType::DropConstraint) {
             return ! $this->containsConstraint($table, $effect->object)
                 || $this->constraintIsRecreated($effects, $position, $effect);
@@ -109,6 +116,40 @@ final class PostgresDdlCoverageValidator
         }
 
         return $this->containsConstraint($table, $name);
+    }
+
+    /**
+     * @param list<array{migration: string, effect: PostgresDdlEffect}> $effects
+     */
+    private function matchesFinalNullability(
+        TableDefinition $table,
+        array $effects,
+        int $position,
+        PostgresDdlEffect $effect,
+    ): bool {
+        $nullable = $effect->type === PostgresDdlEffectType::DropColumnNotNull;
+
+        for ($index = $position + 1, $count = count($effects); $index < $count; $index++) {
+            $later = $effects[$index]['effect'];
+
+            if ($later->table !== $effect->table || $later->object !== $effect->object) {
+                continue;
+            }
+
+            if ($later->type === PostgresDdlEffectType::DropColumnNotNull) {
+                $nullable = true;
+            } elseif ($later->type === PostgresDdlEffectType::SetColumnNotNull) {
+                $nullable = false;
+            }
+        }
+
+        foreach ($table->columns as $column) {
+            if ($column->name === $effect->object) {
+                return $column->nullable === $nullable;
+            }
+        }
+
+        return false;
     }
 
     /**

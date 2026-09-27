@@ -74,6 +74,20 @@ final class PostgresLiteralDdlClassifierTest extends TestCase
             'state_check',
         ];
 
+        yield 'drop column not null' => [
+            'ALTER TABLE users ALTER COLUMN email DROP NOT NULL',
+            PostgresDdlEffectType::DropColumnNotNull,
+            'users',
+            'email',
+        ];
+
+        yield 'set quoted column not null' => [
+            'ALTER TABLE ONLY public.users ALTER COLUMN "displayName" SET NOT NULL;',
+            PostgresDdlEffectType::SetColumnNotNull,
+            'users',
+            'displayName',
+        ];
+
         yield 'unique expression index' => [
             'CREATE UNIQUE INDEX users_email_ci ON public.users USING btree (lower(email))',
             PostgresDdlEffectType::CreateIndex,
@@ -112,7 +126,10 @@ final class PostgresLiteralDdlClassifierTest extends TestCase
         yield 'dollar quoted check expression' => ['ALTER TABLE users ADD CONSTRAINT a CHECK (note <> $$hidden$$)'];
         yield 'non-public schema' => ['ALTER TABLE tenant.users ADD CONSTRAINT a CHECK (id > 0)'];
         yield 'foreign key' => ['ALTER TABLE users ADD CONSTRAINT users_role_fk FOREIGN KEY (role_id) REFERENCES roles (id)'];
-        yield 'alter nullability' => ['ALTER TABLE users ALTER COLUMN email DROP NOT NULL'];
+        yield 'alter nullability without column keyword' => ['ALTER TABLE users ALTER email DROP NOT NULL'];
+        yield 'alter column default' => ['ALTER TABLE users ALTER COLUMN email DROP DEFAULT'];
+        yield 'alter nullability in non-public schema' => ['ALTER TABLE tenant.users ALTER COLUMN email DROP NOT NULL'];
+        yield 'multiple alter column actions' => ['ALTER TABLE users ALTER COLUMN email DROP NOT NULL, ALTER COLUMN name DROP NOT NULL'];
         yield 'drop constraint if exists' => ['ALTER TABLE users DROP CONSTRAINT IF EXISTS users_state_check'];
         yield 'drop constraint cascade' => ['ALTER TABLE users DROP CONSTRAINT users_state_check CASCADE'];
         yield 'rename constraint to itself' => ['ALTER TABLE users RENAME CONSTRAINT state_check TO state_check'];

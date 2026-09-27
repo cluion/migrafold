@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - Classify literal PostgreSQL `VALIDATE CONSTRAINT`, `DROP CONSTRAINT`, and `RENAME CONSTRAINT` operations and verify ordered replacement lifecycles against the final replay snapshot.
+- Classify literal PostgreSQL `ALTER COLUMN ... DROP|SET NOT NULL` operations and verify their final nullability against the replay snapshot.
 
 ## [0.3.0] - 2026-09-27
 

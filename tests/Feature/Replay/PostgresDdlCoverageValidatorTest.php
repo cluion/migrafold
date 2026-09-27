@@ -142,6 +142,43 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
         (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
     }
 
+    public function test_it_accepts_a_nullable_column_reflected_by_the_final_snapshot(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::DropColumnNotNull, 'users', 'email', 12),
+        ]);
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot(emailNullable: true));
+
+        self::addToAssertionCount(1);
+    }
+
+    public function test_it_reduces_column_nullability_changes_to_the_final_state(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::DropColumnNotNull, 'users', 'email', 12),
+            new PostgresDdlEffect(PostgresDdlEffectType::SetColumnNotNull, 'users', 'email', 13),
+        ]);
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
+
+        self::addToAssertionCount(1);
+    }
+
+    public function test_it_rejects_column_nullability_missing_from_the_final_snapshot(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::DropColumnNotNull, 'users', 'email', 12),
+        ]);
+
+        $this->expectException(ReplayVerificationFailed::class);
+        $this->expectExceptionMessage(
+            'PostgreSQL literal DDL effect [drop_column_not_null public.users.email] at line 12 is not represented',
+        );
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
+    }
+
     /** @param list<PostgresDdlEffect> $effects */
     private function report(array $effects): MigrationAnalysisReport
     {
@@ -170,7 +207,10 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
     }
 
     /** @param list<string> $checkNames */
-    private function snapshot(array $checkNames = ['users_state_check']): SchemaSnapshot
+    private function snapshot(
+        array $checkNames = ['users_state_check'],
+        bool $emailNullable = false,
+    ): SchemaSnapshot
     {
         return new SchemaSnapshot(
             '1',
@@ -182,7 +222,17 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
                 collation: null,
                 engine: null,
                 comment: null,
-                columns: [new ColumnDefinition('email', 'varchar(255)', 'varchar', false, null, false, null, null, null)],
+                columns: [new ColumnDefinition(
+                    'email',
+                    'varchar(255)',
+                    'varchar',
+                    $emailNullable,
+                    null,
+                    false,
+                    null,
+                    null,
+                    null,
+                )],
                 indexes: [],
                 foreignKeys: [],
                 checkConstraints: array_map(

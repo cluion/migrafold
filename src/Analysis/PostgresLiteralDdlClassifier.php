@@ -19,10 +19,35 @@ final class PostgresLiteralDdlClassifier
         }
 
         return $this->addCheckConstraint($sql)
+            ?? $this->alterColumnNullability($sql)
             ?? $this->validateConstraint($sql)
             ?? $this->dropConstraint($sql)
             ?? $this->renameConstraint($sql)
             ?? $this->createIndex($sql);
+    }
+
+    private function alterColumnNullability(string $sql): ?PostgresDdlEffect
+    {
+        $pattern = '/\AALTER\s+TABLE\s+(?:ONLY\s+)?(?<table>'.self::QUALIFIED_IDENTIFIER.')'
+            .'\s+ALTER\s+COLUMN\s+(?<column>'.self::IDENTIFIER.')'
+            .'\s+(?<action>DROP|SET)\s+NOT\s+NULL\z/is';
+
+        if (preg_match($pattern, $sql, $matches) !== 1) {
+            return null;
+        }
+
+        $table = $this->publicObjectName($matches['table']);
+        $column = $this->identifierName($matches['column']);
+
+        if ($table === null || $column === null) {
+            return null;
+        }
+
+        $type = strtolower($matches['action']) === 'drop'
+            ? PostgresDdlEffectType::DropColumnNotNull
+            : PostgresDdlEffectType::SetColumnNotNull;
+
+        return new PostgresDdlEffect($type, $table, $column, 0);
     }
 
     private function addCheckConstraint(string $sql): ?PostgresDdlEffect

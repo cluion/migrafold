@@ -128,13 +128,30 @@ PHP, postgres: true);
     {
         $analysis = $this->analyze(<<<'PHP'
 DB::statement('ALTER TABLE users ADD CONSTRAINT users_id_check CHECK (id > 0); DROP TABLE users');
-DB::statement('ALTER TABLE users ALTER COLUMN email DROP NOT NULL');
+DB::statement('ALTER TABLE users ALTER COLUMN email DROP DEFAULT');
 PHP, postgres: true);
 
         self::assertSame(MigrationClassification::RawSchema, $analysis->classification);
         self::assertSame(MigrationCompactionAction::Block, $analysis->action());
         self::assertSame([], $analysis->postgresDdlEffects);
         $this->assertSignal($analysis->signals, 'raw.db_statement@');
+    }
+
+    public function test_postgres_mode_accepts_literal_column_nullability_effects(): void
+    {
+        $analysis = $this->analyze(<<<'PHP'
+DB::statement('ALTER TABLE users ALTER COLUMN email DROP NOT NULL');
+DB::statement('ALTER TABLE users ALTER COLUMN email SET NOT NULL');
+PHP, postgres: true);
+
+        self::assertSame(MigrationClassification::SchemaOnly, $analysis->classification);
+        self::assertSame(MigrationCompactionAction::Compact, $analysis->action());
+        self::assertSame(
+            [PostgresDdlEffectType::DropColumnNotNull, PostgresDdlEffectType::SetColumnNotNull],
+            array_column($analysis->postgresDdlEffects, 'type'),
+        );
+        $this->assertSignal($analysis->signals, 'schema.postgres_drop_column_not_null@');
+        $this->assertSignal($analysis->signals, 'schema.postgres_set_column_not_null@');
     }
 
     public function test_postgres_mode_accepts_literal_constraint_lifecycle_effects(): void
