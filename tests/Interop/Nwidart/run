@@ -3,11 +3,17 @@
 set -eu
 
 interop_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-temporary_root=${TMPDIR:-/tmp}
 
 for suite in Laravel12 Laravel13; do
     suite_root="$interop_root/$suite"
-    test_database="$temporary_root/migrafold_nwidart_$(printf '%s' "$suite" | tr '[:upper:]' '[:lower:]')_testing"
+    suite_slug=$(printf '%s' "$suite" | tr '[:upper:]' '[:lower:]')
+    expected_test_database="/tmp/migrafold_nwidart_${suite_slug}_testing"
+    test_database=$(sed -n 's/.*<env name="DB_DATABASE" value="\([^"]*\)".*/\1/p' "$suite_root/phpunit.xml")
+
+    if [ "$test_database" != "$expected_test_database" ]; then
+        echo "Refusing unexpected nWidart test database [$test_database]; expected [$expected_test_database]." >&2
+        exit 78
+    fi
 
     if [ ! -f "$suite_root/.env" ]; then
         cp "$suite_root/.env.example" "$suite_root/.env"
