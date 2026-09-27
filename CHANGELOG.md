@@ -21,6 +21,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Keep migration analysis compatible with PHP-Parser 5.9 argument placeholders while continuing to reject non-literal schema arguments.
 - Declare Moduark `^1.3` as the supported optional integration range and report a missing `ResourceManifest` service explicitly.
 - Recognize Laravel's `constrained()` foreign-key definition as a schema-only migration operation.
 - Canonicalize PostgreSQL `ANY(ARRAY[...])` casts and associative boolean grouping so equivalent CHECK constraints and partial-index predicates keep identical fingerprints after replay.

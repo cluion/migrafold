@@ -21,7 +21,6 @@ use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Stmt;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassMethod;
-use PhpParser\Node\VariadicPlaceholder;
 use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
@@ -625,7 +624,7 @@ final readonly class MigrationAnalyzer
     }
 
     /**
-     * @param array<Arg|VariadicPlaceholder> $arguments
+     * @param array<Node> $arguments
      */
     private function hasLiteralArguments(array $arguments, int $count): bool
     {
