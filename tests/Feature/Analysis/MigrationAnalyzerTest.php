@@ -154,6 +154,21 @@ PHP, postgres: true);
         $this->assertSignal($analysis->signals, 'schema.postgres_set_column_not_null@');
     }
 
+    public function test_postgres_mode_accepts_literal_deferrable_foreign_key_effects(): void
+    {
+        $analysis = $this->analyze(<<<'PHP'
+DB::statement('ALTER TABLE users ADD CONSTRAINT users_parent_fk FOREIGN KEY (parent_id) REFERENCES users (id) DEFERRABLE INITIALLY DEFERRED');
+PHP, postgres: true);
+
+        self::assertSame(MigrationClassification::SchemaOnly, $analysis->classification);
+        self::assertSame(MigrationCompactionAction::Compact, $analysis->action());
+        self::assertSame(
+            [PostgresDdlEffectType::AddForeignKeyConstraint],
+            array_column($analysis->postgresDdlEffects, 'type'),
+        );
+        $this->assertSignal($analysis->signals, 'schema.postgres_add_foreign_key_constraint@');
+    }
+
     public function test_postgres_mode_accepts_literal_constraint_lifecycle_effects(): void
     {
         $analysis = $this->analyze(<<<'PHP'

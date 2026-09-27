@@ -8,6 +8,8 @@ final class PostgresLiteralDdlClassifier
 {
     private const IDENTIFIER = '(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)';
 
+    private const IDENTIFIER_LIST = self::IDENTIFIER.'(?:\s*,\s*'.self::IDENTIFIER.')*';
+
     private const QUALIFIED_IDENTIFIER = self::IDENTIFIER.'(?:\s*\.\s*'.self::IDENTIFIER.')?';
 
     public function classify(string $sql): ?PostgresDdlEffect
@@ -19,11 +21,47 @@ final class PostgresLiteralDdlClassifier
         }
 
         return $this->addCheckConstraint($sql)
+            ?? $this->addForeignKeyConstraint($sql)
             ?? $this->alterColumnNullability($sql)
             ?? $this->validateConstraint($sql)
             ?? $this->dropConstraint($sql)
             ?? $this->renameConstraint($sql)
             ?? $this->createIndex($sql);
+    }
+
+    private function addForeignKeyConstraint(string $sql): ?PostgresDdlEffect
+    {
+        $pattern = '/\AALTER\s+TABLE\s+(?:ONLY\s+)?(?<table>'.self::QUALIFIED_IDENTIFIER.')'
+            .'\s+ADD\s+CONSTRAINT\s+(?<constraint>'.self::IDENTIFIER.')'
+            .'\s+FOREIGN\s+KEY\s*\((?<columns>'.self::IDENTIFIER_LIST.')\)'
+            .'\s+REFERENCES\s+(?<foreign_table>'.self::QUALIFIED_IDENTIFIER.')'
+            .'\s*\((?<foreign_columns>'.self::IDENTIFIER_LIST.')\)'
+            .'\s+DEFERRABLE\s+INITIALLY\s+(?:DEFERRED|IMMEDIATE)\z/is';
+
+        if (preg_match($pattern, $sql, $matches) !== 1) {
+            return null;
+        }
+
+        $table = $this->publicObjectName($matches['table']);
+        $constraint = $this->identifierName($matches['constraint']);
+        $foreignTable = $this->publicObjectName($matches['foreign_table']);
+        $columnCount = preg_match_all('/'.self::IDENTIFIER.'/', $matches['columns']);
+        $foreignColumnCount = preg_match_all('/'.self::IDENTIFIER.'/', $matches['foreign_columns']);
+
+        if ($table === null
+            || $constraint === null
+            || $foreignTable === null
+            || $columnCount < 1
+            || $columnCount !== $foreignColumnCount) {
+            return null;
+        }
+
+        return new PostgresDdlEffect(
+            PostgresDdlEffectType::AddForeignKeyConstraint,
+            $table,
+            $constraint,
+            0,
+        );
     }
 
     private function alterColumnNullability(string $sql): ?PostgresDdlEffect

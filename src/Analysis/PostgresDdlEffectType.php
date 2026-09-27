@@ -7,6 +7,7 @@ namespace Cluion\Migrafold\Analysis;
 enum PostgresDdlEffectType: string
 {
     case AddCheckConstraint = 'add_check_constraint';
+    case AddForeignKeyConstraint = 'add_foreign_key_constraint';
     case CreateIndex = 'create_index';
     case DropColumnNotNull = 'drop_column_not_null';
     case DropConstraint = 'drop_constraint';

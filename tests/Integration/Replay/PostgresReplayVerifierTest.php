@@ -279,9 +279,11 @@ return new class extends Migration
         Schema::create('users', static function (Blueprint $table): void {
             $table->id();
             $table->string('email')->unique();
+            $table->unsignedBigInteger('parent_id')->nullable();
         });
 
         DB::statement("ALTER TABLE users ADD CONSTRAINT users_email_present CHECK (email <> '')");
+        DB::statement('ALTER TABLE users ADD CONSTRAINT users_parent_fk FOREIGN KEY (parent_id) REFERENCES users (id) DEFERRABLE INITIALLY DEFERRED');
         DB::statement('CREATE UNIQUE INDEX users_email_ci ON users (lower(email))');
     }
 

@@ -18,6 +18,7 @@ use Cluion\Migrafold\Schema\Definition\CapabilityReport;
 use Cluion\Migrafold\Schema\Definition\CheckConstraintDefinition;
 use Cluion\Migrafold\Schema\Definition\ColumnDefinition;
 use Cluion\Migrafold\Schema\Definition\ExpressionIndexDefinition;
+use Cluion\Migrafold\Schema\Definition\ForeignKeyDefinition;
 use Cluion\Migrafold\Schema\Definition\SchemaSnapshot;
 use Cluion\Migrafold\Schema\Definition\TableDefinition;
 use PHPUnit\Framework\TestCase;
@@ -142,6 +143,78 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
         (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
     }
 
+    public function test_it_accepts_a_named_foreign_key_present_in_the_final_snapshot(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(
+                PostgresDdlEffectType::AddForeignKeyConstraint,
+                'users',
+                'users_parent_fk',
+                12,
+            ),
+        ]);
+
+        (new PostgresDdlCoverageValidator())->assertCovered(
+            $report,
+            $this->snapshot(foreignKeyNames: ['users_parent_fk']),
+        );
+
+        self::addToAssertionCount(1);
+    }
+
+    public function test_it_rejects_a_foreign_key_missing_from_the_final_snapshot(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(
+                PostgresDdlEffectType::AddForeignKeyConstraint,
+                'users',
+                'users_parent_fk',
+                12,
+            ),
+        ]);
+
+        $this->expectException(ReplayVerificationFailed::class);
+        $this->expectExceptionMessage(
+            'PostgreSQL literal DDL effect [add_foreign_key_constraint public.users.users_parent_fk] at line 12 is not represented',
+        );
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
+    }
+
+    public function test_it_accepts_a_foreign_key_recreated_under_the_same_name(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::DropConstraint, 'users', 'users_parent_fk', 12),
+            new PostgresDdlEffect(
+                PostgresDdlEffectType::AddForeignKeyConstraint,
+                'users',
+                'users_parent_fk',
+                13,
+            ),
+        ]);
+
+        (new PostgresDdlCoverageValidator())->assertCovered(
+            $report,
+            $this->snapshot(foreignKeyNames: ['users_parent_fk']),
+        );
+
+        self::addToAssertionCount(1);
+    }
+
+    public function test_it_accepts_validation_of_a_foreign_key_in_the_final_snapshot(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::ValidateConstraint, 'users', 'users_parent_fk', 12),
+        ]);
+
+        (new PostgresDdlCoverageValidator())->assertCovered(
+            $report,
+            $this->snapshot(foreignKeyNames: ['users_parent_fk']),
+        );
+
+        self::addToAssertionCount(1);
+    }
+
     public function test_it_accepts_a_nullable_column_reflected_by_the_final_snapshot(): void
     {
         $report = $this->report([
@@ -206,10 +279,14 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
         ]);
     }
 
-    /** @param list<string> $checkNames */
+    /**
+     * @param list<string> $checkNames
+     * @param list<string> $foreignKeyNames
+     */
     private function snapshot(
         array $checkNames = ['users_state_check'],
         bool $emailNullable = false,
+        array $foreignKeyNames = [],
     ): SchemaSnapshot
     {
         return new SchemaSnapshot(
@@ -234,7 +311,20 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
                     null,
                 )],
                 indexes: [],
-                foreignKeys: [],
+                foreignKeys: array_map(
+                    static fn (string $name): ForeignKeyDefinition => new ForeignKeyDefinition(
+                        $name,
+                        ['parent_id'],
+                        'public',
+                        'users',
+                        ['id'],
+                        null,
+                        null,
+                        true,
+                        true,
+                    ),
+                    $foreignKeyNames,
+                ),
                 checkConstraints: array_map(
                     static fn (string $name): CheckConstraintDefinition => new CheckConstraintDefinition(
                         $name,

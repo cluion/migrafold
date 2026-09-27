@@ -104,15 +104,23 @@ final class PostgresDdlCoverageValidator
             return true;
         }
 
-        if (in_array($effect->type, [
-            PostgresDdlEffectType::AddCheckConstraint,
-            PostgresDdlEffectType::ValidateConstraint,
-        ], true)) {
+        if ($effect->type === PostgresDdlEffectType::AddCheckConstraint) {
             return in_array(
                 $name,
                 array_column($table->checkConstraints, 'name'),
                 true,
             );
+        }
+
+        if ($effect->type === PostgresDdlEffectType::AddForeignKeyConstraint) {
+            return in_array($name, array_column($table->foreignKeys, 'name'), true);
+        }
+
+        if ($effect->type === PostgresDdlEffectType::ValidateConstraint) {
+            return in_array($name, [
+                ...array_column($table->checkConstraints, 'name'),
+                ...array_column($table->foreignKeys, 'name'),
+            ], true);
         }
 
         return $this->containsConstraint($table, $name);
@@ -203,7 +211,10 @@ final class PostgresDdlCoverageValidator
                 continue;
             }
 
-            if ($later->type === PostgresDdlEffectType::AddCheckConstraint
+            if (in_array($later->type, [
+                PostgresDdlEffectType::AddCheckConstraint,
+                PostgresDdlEffectType::AddForeignKeyConstraint,
+            ], true)
                 && $later->object === $dropped->object
                 && $this->finalConstraintName(
                     $effects,
