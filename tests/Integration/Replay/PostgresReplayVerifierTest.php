@@ -284,7 +284,9 @@ return new class extends Migration
 
         DB::statement("ALTER TABLE users ADD CONSTRAINT users_email_present CHECK (email <> '')");
         DB::statement('ALTER TABLE users ADD CONSTRAINT users_parent_fk FOREIGN KEY (parent_id) REFERENCES users (id) DEFERRABLE INITIALLY DEFERRED');
+        DB::statement("ALTER TABLE users ADD COLUMN search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', coalesce(email, ''))) STORED");
         DB::statement('CREATE UNIQUE INDEX users_email_ci ON users (lower(email))');
+        DB::statement('CREATE INDEX users_search_vector_gin ON users USING gin (search_vector)');
     }
 
     public function down(): void {}

@@ -19,6 +19,7 @@ use Cluion\Migrafold\Schema\Definition\CheckConstraintDefinition;
 use Cluion\Migrafold\Schema\Definition\ColumnDefinition;
 use Cluion\Migrafold\Schema\Definition\ExpressionIndexDefinition;
 use Cluion\Migrafold\Schema\Definition\ForeignKeyDefinition;
+use Cluion\Migrafold\Schema\Definition\GeneratedColumnDefinition;
 use Cluion\Migrafold\Schema\Definition\SchemaSnapshot;
 use Cluion\Migrafold\Schema\Definition\TableDefinition;
 use PHPUnit\Framework\TestCase;
@@ -226,6 +227,44 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
         self::addToAssertionCount(1);
     }
 
+    public function test_it_accepts_a_stored_generated_tsvector_column_in_the_final_snapshot(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(
+                PostgresDdlEffectType::AddGeneratedTsvectorColumn,
+                'users',
+                'search_vector',
+                12,
+            ),
+        ]);
+
+        (new PostgresDdlCoverageValidator())->assertCovered(
+            $report,
+            $this->snapshot(includeSearchVector: true),
+        );
+
+        self::addToAssertionCount(1);
+    }
+
+    public function test_it_rejects_a_generated_tsvector_column_missing_from_the_final_snapshot(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(
+                PostgresDdlEffectType::AddGeneratedTsvectorColumn,
+                'users',
+                'search_vector',
+                12,
+            ),
+        ]);
+
+        $this->expectException(ReplayVerificationFailed::class);
+        $this->expectExceptionMessage(
+            'PostgreSQL literal DDL effect [add_generated_tsvector_column public.users.search_vector] at line 12 is not represented',
+        );
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
+    }
+
     public function test_it_reduces_column_nullability_changes_to_the_final_state(): void
     {
         $report = $this->report([
@@ -287,6 +326,7 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
         array $checkNames = ['users_state_check'],
         bool $emailNullable = false,
         array $foreignKeyNames = [],
+        bool $includeSearchVector = false,
     ): SchemaSnapshot
     {
         return new SchemaSnapshot(
@@ -299,17 +339,33 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
                 collation: null,
                 engine: null,
                 comment: null,
-                columns: [new ColumnDefinition(
-                    'email',
-                    'varchar(255)',
-                    'varchar',
-                    $emailNullable,
-                    null,
-                    false,
-                    null,
-                    null,
-                    null,
-                )],
+                columns: [
+                    new ColumnDefinition(
+                        'email',
+                        'varchar(255)',
+                        'varchar',
+                        $emailNullable,
+                        null,
+                        false,
+                        null,
+                        null,
+                        null,
+                    ),
+                    ...($includeSearchVector ? [new ColumnDefinition(
+                        'search_vector',
+                        'tsvector',
+                        'tsvector',
+                        true,
+                        null,
+                        false,
+                        null,
+                        null,
+                        new GeneratedColumnDefinition(
+                            'stored',
+                            "to_tsvector('simple', coalesce(email, ''))",
+                        ),
+                    )] : []),
+                ],
                 indexes: [],
                 foreignKeys: array_map(
                     static fn (string $name): ForeignKeyDefinition => new ForeignKeyDefinition(

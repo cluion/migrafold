@@ -22,11 +22,39 @@ final class PostgresLiteralDdlClassifier
 
         return $this->addCheckConstraint($sql)
             ?? $this->addForeignKeyConstraint($sql)
+            ?? $this->addGeneratedTsvectorColumn($sql)
             ?? $this->alterColumnNullability($sql)
             ?? $this->validateConstraint($sql)
             ?? $this->dropConstraint($sql)
             ?? $this->renameConstraint($sql)
             ?? $this->createIndex($sql);
+    }
+
+    private function addGeneratedTsvectorColumn(string $sql): ?PostgresDdlEffect
+    {
+        $pattern = '/\AALTER\s+TABLE\s+(?:ONLY\s+)?(?<table>'.self::QUALIFIED_IDENTIFIER.')'
+            .'\s+ADD\s+COLUMN\s+(?<column>'.self::IDENTIFIER.')'
+            .'\s+TSVECTOR\s+GENERATED\s+ALWAYS\s+AS\s*'
+            .'(?<expression>\(.+\))\s+STORED\z/is';
+
+        if (preg_match($pattern, $sql, $matches) !== 1
+            || ! $this->balancedParentheses($matches['expression'])) {
+            return null;
+        }
+
+        $table = $this->publicObjectName($matches['table']);
+        $column = $this->identifierName($matches['column']);
+
+        if ($table === null || $column === null) {
+            return null;
+        }
+
+        return new PostgresDdlEffect(
+            PostgresDdlEffectType::AddGeneratedTsvectorColumn,
+            $table,
+            $column,
+            0,
+        );
     }
 
     private function addForeignKeyConstraint(string $sql): ?PostgresDdlEffect

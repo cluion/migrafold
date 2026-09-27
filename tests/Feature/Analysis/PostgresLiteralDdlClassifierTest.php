@@ -65,6 +65,19 @@ SQL,
             'outbox_replay_envelopes_parent_fk',
         ];
 
+        yield 'stored generated tsvector column' => [
+            <<<'SQL'
+ALTER TABLE search_documents
+ADD COLUMN search_vector tsvector GENERATED ALWAYS AS (
+    setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
+    setweight(to_tsvector('simple', coalesce(body, '')), 'B')
+) STORED
+SQL,
+            PostgresDdlEffectType::AddGeneratedTsvectorColumn,
+            'search_documents',
+            'search_vector',
+        ];
+
         yield 'validate quoted public constraint' => [
             'ALTER TABLE ONLY public.users VALIDATE CONSTRAINT "users_state_check";',
             PostgresDdlEffectType::ValidateConstraint,
@@ -144,6 +157,10 @@ SQL,
         yield 'unvalidated foreign key' => ['ALTER TABLE users ADD CONSTRAINT users_role_fk FOREIGN KEY (role_id) REFERENCES roles (id) DEFERRABLE INITIALLY IMMEDIATE NOT VALID'];
         yield 'foreign key to non-public schema' => ['ALTER TABLE users ADD CONSTRAINT users_role_fk FOREIGN KEY (role_id) REFERENCES tenant.roles (id) DEFERRABLE INITIALLY IMMEDIATE'];
         yield 'foreign key with mismatched columns' => ['ALTER TABLE users ADD CONSTRAINT users_role_fk FOREIGN KEY (tenant_id, role_id) REFERENCES roles (id) DEFERRABLE INITIALLY IMMEDIATE'];
+        yield 'generated non-tsvector column' => ["ALTER TABLE users ADD COLUMN search_text text GENERATED ALWAYS AS (lower(email)) STORED"];
+        yield 'virtual generated tsvector column' => ["ALTER TABLE users ADD COLUMN search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', email)) VIRTUAL"];
+        yield 'generated tsvector in non-public schema' => ["ALTER TABLE tenant.users ADD COLUMN search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', email)) STORED"];
+        yield 'generated tsvector if not exists' => ["ALTER TABLE users ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', email)) STORED"];
         yield 'alter nullability without column keyword' => ['ALTER TABLE users ALTER email DROP NOT NULL'];
         yield 'alter column default' => ['ALTER TABLE users ALTER COLUMN email DROP DEFAULT'];
         yield 'alter nullability in non-public schema' => ['ALTER TABLE tenant.users ALTER COLUMN email DROP NOT NULL'];

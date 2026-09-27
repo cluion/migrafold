@@ -78,6 +78,10 @@ final class PostgresDdlCoverageValidator
             return in_array($effect->object, $this->indexNames($table), true);
         }
 
+        if ($effect->type === PostgresDdlEffectType::AddGeneratedTsvectorColumn) {
+            return $this->containsGeneratedTsvectorColumn($table, $effect->object);
+        }
+
         if (in_array($effect->type, [
             PostgresDdlEffectType::DropColumnNotNull,
             PostgresDdlEffectType::SetColumnNotNull,
@@ -124,6 +128,21 @@ final class PostgresDdlCoverageValidator
         }
 
         return $this->containsConstraint($table, $name);
+    }
+
+    private function containsGeneratedTsvectorColumn(TableDefinition $table, string $name): bool
+    {
+        foreach ($table->columns as $column) {
+            if ($column->name === $name
+                && $column->type === 'tsvector'
+                && $column->generation?->type === 'stored'
+                && is_string($column->generation->expression)
+                && trim($column->generation->expression) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
