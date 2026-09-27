@@ -17,6 +17,7 @@ final class PostgresLiteralDdlClassifierTest extends TestCase
         PostgresDdlEffectType $type,
         string $table,
         string $object,
+        ?string $targetObject = null,
     ): void {
         $effect = (new PostgresLiteralDdlClassifier())->classify($sql);
 
@@ -24,9 +25,10 @@ final class PostgresLiteralDdlClassifierTest extends TestCase
         self::assertSame($type, $effect->type);
         self::assertSame($table, $effect->table);
         self::assertSame($object, $effect->object);
+        self::assertSame($targetObject, $effect->targetObject);
     }
 
-    /** @return iterable<string, array{string, PostgresDdlEffectType, string, string}> */
+    /** @return iterable<string, array{0: string, 1: PostgresDdlEffectType, 2: string, 3: string, 4?: string|null}> */
     public static function supportedStatements(): iterable
     {
         yield 'check constraint' => [
@@ -48,6 +50,28 @@ final class PostgresLiteralDdlClassifierTest extends TestCase
             PostgresDdlEffectType::AddCheckConstraint,
             'users',
             'users_id_check',
+        ];
+
+        yield 'validate quoted public constraint' => [
+            'ALTER TABLE ONLY public.users VALIDATE CONSTRAINT "users_state_check";',
+            PostgresDdlEffectType::ValidateConstraint,
+            'users',
+            'users_state_check',
+        ];
+
+        yield 'drop constraint' => [
+            'ALTER TABLE users DROP CONSTRAINT users_state_check',
+            PostgresDdlEffectType::DropConstraint,
+            'users',
+            'users_state_check',
+        ];
+
+        yield 'rename constraint' => [
+            'ALTER TABLE "public"."users" RENAME CONSTRAINT "state_check_next" TO "state_check"',
+            PostgresDdlEffectType::RenameConstraint,
+            'users',
+            'state_check_next',
+            'state_check',
         ];
 
         yield 'unique expression index' => [
@@ -89,9 +113,10 @@ final class PostgresLiteralDdlClassifierTest extends TestCase
         yield 'non-public schema' => ['ALTER TABLE tenant.users ADD CONSTRAINT a CHECK (id > 0)'];
         yield 'foreign key' => ['ALTER TABLE users ADD CONSTRAINT users_role_fk FOREIGN KEY (role_id) REFERENCES roles (id)'];
         yield 'alter nullability' => ['ALTER TABLE users ALTER COLUMN email DROP NOT NULL'];
-        yield 'drop constraint' => ['ALTER TABLE users DROP CONSTRAINT users_state_check'];
-        yield 'rename constraint' => ['ALTER TABLE users RENAME CONSTRAINT old_check TO new_check'];
-        yield 'validate constraint' => ['ALTER TABLE users VALIDATE CONSTRAINT users_state_check'];
+        yield 'drop constraint if exists' => ['ALTER TABLE users DROP CONSTRAINT IF EXISTS users_state_check'];
+        yield 'drop constraint cascade' => ['ALTER TABLE users DROP CONSTRAINT users_state_check CASCADE'];
+        yield 'rename constraint to itself' => ['ALTER TABLE users RENAME CONSTRAINT state_check TO state_check'];
+        yield 'validate non-public constraint' => ['ALTER TABLE tenant.users VALIDATE CONSTRAINT users_state_check'];
         yield 'create table' => ['CREATE TABLE users (id bigint primary key)'];
         yield 'create view' => ['CREATE VIEW active_users AS SELECT * FROM users'];
         yield 'unsupported index method' => ['CREATE INDEX users_email_hash ON users USING hash (email)'];

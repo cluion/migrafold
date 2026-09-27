@@ -18,7 +18,11 @@ final class PostgresLiteralDdlClassifier
             return null;
         }
 
-        return $this->addCheckConstraint($sql) ?? $this->createIndex($sql);
+        return $this->addCheckConstraint($sql)
+            ?? $this->validateConstraint($sql)
+            ?? $this->dropConstraint($sql)
+            ?? $this->renameConstraint($sql)
+            ?? $this->createIndex($sql);
     }
 
     private function addCheckConstraint(string $sql): ?PostgresDdlEffect
@@ -98,6 +102,69 @@ final class PostgresLiteralDdlClassifier
             $index,
             0,
         );
+    }
+
+    private function validateConstraint(string $sql): ?PostgresDdlEffect
+    {
+        $pattern = '/\AALTER\s+TABLE\s+(?:ONLY\s+)?(?<table>'.self::QUALIFIED_IDENTIFIER.')'
+            .'\s+VALIDATE\s+CONSTRAINT\s+(?<constraint>'.self::IDENTIFIER.')\z/is';
+
+        return $this->constraintEffect($sql, $pattern, PostgresDdlEffectType::ValidateConstraint);
+    }
+
+    private function dropConstraint(string $sql): ?PostgresDdlEffect
+    {
+        $pattern = '/\AALTER\s+TABLE\s+(?:ONLY\s+)?(?<table>'.self::QUALIFIED_IDENTIFIER.')'
+            .'\s+DROP\s+CONSTRAINT\s+(?<constraint>'.self::IDENTIFIER.')\z/is';
+
+        return $this->constraintEffect($sql, $pattern, PostgresDdlEffectType::DropConstraint);
+    }
+
+    private function renameConstraint(string $sql): ?PostgresDdlEffect
+    {
+        $pattern = '/\AALTER\s+TABLE\s+(?:ONLY\s+)?(?<table>'.self::QUALIFIED_IDENTIFIER.')'
+            .'\s+RENAME\s+CONSTRAINT\s+(?<constraint>'.self::IDENTIFIER.')'
+            .'\s+TO\s+(?<target>'.self::IDENTIFIER.')\z/is';
+
+        if (preg_match($pattern, $sql, $matches) !== 1) {
+            return null;
+        }
+
+        $table = $this->publicObjectName($matches['table']);
+        $constraint = $this->identifierName($matches['constraint']);
+        $target = $this->identifierName($matches['target']);
+
+        if ($table === null || $constraint === null || $target === null || $constraint === $target) {
+            return null;
+        }
+
+        return new PostgresDdlEffect(
+            PostgresDdlEffectType::RenameConstraint,
+            $table,
+            $constraint,
+            0,
+            $target,
+        );
+    }
+
+    private function constraintEffect(
+        string $sql,
+        string $pattern,
+        PostgresDdlEffectType $type,
+    ): ?PostgresDdlEffect
+    {
+        if (preg_match($pattern, $sql, $matches) !== 1) {
+            return null;
+        }
+
+        $table = $this->publicObjectName($matches['table']);
+        $constraint = $this->identifierName($matches['constraint']);
+
+        if ($table === null || $constraint === null) {
+            return null;
+        }
+
+        return new PostgresDdlEffect($type, $table, $constraint, 0);
     }
 
     private function singleStatement(string $sql): ?string

@@ -11,10 +11,11 @@ final readonly class PostgresDdlEffect
         public string $table,
         public string $object,
         public int $line,
+        public ?string $targetObject = null,
     ) {}
 
     public function withLine(int $line): self
     {
-        return new self($this->type, $this->table, $this->object, $line);
+        return new self($this->type, $this->table, $this->object, $line, $this->targetObject);
     }
 }

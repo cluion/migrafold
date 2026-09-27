@@ -50,6 +50,98 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
         (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
     }
 
+    public function test_it_reduces_a_check_constraint_replacement_to_its_final_name(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::AddCheckConstraint, 'users', 'users_state_check', 10),
+            new PostgresDdlEffect(PostgresDdlEffectType::AddCheckConstraint, 'users', 'users_state_check_next', 20),
+            new PostgresDdlEffect(PostgresDdlEffectType::ValidateConstraint, 'users', 'users_state_check_next', 30),
+            new PostgresDdlEffect(PostgresDdlEffectType::DropConstraint, 'users', 'users_state_check', 40),
+            new PostgresDdlEffect(
+                PostgresDdlEffectType::RenameConstraint,
+                'users',
+                'users_state_check_next',
+                41,
+                'users_state_check',
+            ),
+        ]);
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
+
+        self::addToAssertionCount(1);
+    }
+
+    public function test_it_accepts_a_constraint_drop_reflected_by_the_final_snapshot(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::DropConstraint, 'users', 'users_state_check', 12),
+        ]);
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot([]));
+
+        self::addToAssertionCount(1);
+    }
+
+    public function test_it_accepts_a_constraint_recreated_under_the_same_name(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::DropConstraint, 'users', 'users_state_check', 12),
+            new PostgresDdlEffect(PostgresDdlEffectType::AddCheckConstraint, 'users', 'users_state_check', 13),
+        ]);
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
+
+        self::addToAssertionCount(1);
+    }
+
+    public function test_it_rejects_a_constraint_drop_not_reflected_by_the_final_snapshot(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::DropConstraint, 'users', 'users_state_check', 12),
+        ]);
+
+        $this->expectException(ReplayVerificationFailed::class);
+        $this->expectExceptionMessage(
+            'PostgreSQL literal DDL effect [drop_constraint public.users.users_state_check] at line 12 is not represented',
+        );
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
+    }
+
+    public function test_it_rejects_a_constraint_rename_without_its_final_target(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(
+                PostgresDdlEffectType::RenameConstraint,
+                'users',
+                'users_state_check',
+                12,
+                'users_state_check_next',
+            ),
+        ]);
+
+        $this->expectException(ReplayVerificationFailed::class);
+        $this->expectExceptionMessage(
+            'PostgreSQL literal DDL effect [rename_constraint public.users.users_state_check] at line 12 is not represented',
+        );
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
+    }
+
+    public function test_it_rejects_validation_without_a_final_check_constraint(): void
+    {
+        $report = $this->report([
+            new PostgresDdlEffect(PostgresDdlEffectType::ValidateConstraint, 'users', 'users_missing', 12),
+        ]);
+
+        $this->expectException(ReplayVerificationFailed::class);
+        $this->expectExceptionMessage(
+            'PostgreSQL literal DDL effect [validate_constraint public.users.users_missing] at line 12 is not represented',
+        );
+
+        (new PostgresDdlCoverageValidator())->assertCovered($report, $this->snapshot());
+    }
+
     /** @param list<PostgresDdlEffect> $effects */
     private function report(array $effects): MigrationAnalysisReport
     {
@@ -77,7 +169,8 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
         ]);
     }
 
-    private function snapshot(): SchemaSnapshot
+    /** @param list<string> $checkNames */
+    private function snapshot(array $checkNames = ['users_state_check']): SchemaSnapshot
     {
         return new SchemaSnapshot(
             '1',
@@ -92,7 +185,13 @@ final class PostgresDdlCoverageValidatorTest extends TestCase
                 columns: [new ColumnDefinition('email', 'varchar(255)', 'varchar', false, null, false, null, null, null)],
                 indexes: [],
                 foreignKeys: [],
-                checkConstraints: [new CheckConstraintDefinition('users_state_check', "state = 'active'")],
+                checkConstraints: array_map(
+                    static fn (string $name): CheckConstraintDefinition => new CheckConstraintDefinition(
+                        $name,
+                        "state = 'active'",
+                    ),
+                    $checkNames,
+                ),
                 expressionIndexes: [new ExpressionIndexDefinition('users_email_ci', 'lower(email)', true)],
             )],
         );

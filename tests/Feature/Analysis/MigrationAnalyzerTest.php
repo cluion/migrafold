@@ -137,6 +137,30 @@ PHP, postgres: true);
         $this->assertSignal($analysis->signals, 'raw.db_statement@');
     }
 
+    public function test_postgres_mode_accepts_literal_constraint_lifecycle_effects(): void
+    {
+        $analysis = $this->analyze(<<<'PHP'
+DB::statement('ALTER TABLE users VALIDATE CONSTRAINT users_state_check_next');
+DB::statement('ALTER TABLE users DROP CONSTRAINT users_state_check');
+DB::statement('ALTER TABLE users RENAME CONSTRAINT users_state_check_next TO users_state_check');
+PHP, postgres: true);
+
+        self::assertSame(MigrationClassification::SchemaOnly, $analysis->classification);
+        self::assertSame(MigrationCompactionAction::Compact, $analysis->action());
+        self::assertSame(
+            [
+                PostgresDdlEffectType::ValidateConstraint,
+                PostgresDdlEffectType::DropConstraint,
+                PostgresDdlEffectType::RenameConstraint,
+            ],
+            array_column($analysis->postgresDdlEffects, 'type'),
+        );
+        self::assertSame('users_state_check', $analysis->postgresDdlEffects[2]->targetObject);
+        $this->assertSignal($analysis->signals, 'schema.postgres_validate_constraint@');
+        $this->assertSignal($analysis->signals, 'schema.postgres_drop_constraint@');
+        $this->assertSignal($analysis->signals, 'schema.postgres_rename_constraint@');
+    }
+
     public function test_variable_table_name_blocks_as_dynamic_schema(): void
     {
         $analysis = $this->analyze(<<<'PHP'

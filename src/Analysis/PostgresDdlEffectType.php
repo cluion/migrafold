@@ -8,4 +8,7 @@ enum PostgresDdlEffectType: string
 {
     case AddCheckConstraint = 'add_check_constraint';
     case CreateIndex = 'create_index';
+    case DropConstraint = 'drop_constraint';
+    case RenameConstraint = 'rename_constraint';
+    case ValidateConstraint = 'validate_constraint';
 }
